@@ -9,7 +9,7 @@
   const VERSION='0.6.0';
   const SAVE_KEY='civilization-seed-save-v1';
   const SAFE_KEY=SAVE_KEY+'-last-good';
-  const GAME_RECOVERY_VERSION='1.1.3';
+  const GAME_RECOVERY_VERSION='1.1.4';
   const DB_NAME='civilization-seed-db';
   const MAX_OFFLINE=8*60*60;
   const TABS=['home','people','buildings','research','history'];
@@ -196,40 +196,81 @@ pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
   // Safety layer for installed iOS PWA navigation. Never turn a storage error
   // or malformed save into a fresh game and then autosave over user progress.
   let storageReady=false, saveAllowed=false, storageIssue='', saveInProgress=false;
-  let storageOpenStatus='unavailable';
+  let storageOpenStatus='unavailable', databaseReadVerified=false;
+  // Some iOS PWA reentries can leave an IndexedDB transaction pending forever.
+  // A verified local copy must be allowed to start the game without losing data.
+  const FAST_OPEN_WAIT=1100, SLOW_OPEN_WAIT=3800;
+  const FAST_READ_WAIT=1300, SLOW_READ_WAIT=2500;
   function isSaveShape(v){return !!(v&&v.schema===1&&typeof v.population==='number'&&Number.isFinite(v.population)&&v.resources&&typeof v.resources==='object'&&v.jobs&&typeof v.jobs==='object');}
   function parseSave(raw){if(!raw)return null;try{const value=typeof raw==='string'?JSON.parse(raw):raw;return isSaveShape(value)?value:null;}catch(_){return null;}}
+  function validSave(raw){const parsed=parseSave(raw);if(!parsed)return null;try{sanitize(parsed);return parsed;}catch(_){return null;}}
   function storageNotice(title,body,allowRetry=true){
-    loaded=false;saveAllowed=false;
-    const node=$('#main');if(node)node.innerHTML=`<section class="panel" style="margin:20px 0;padding:20px"><h2>${esc(title)}</h2><p>${esc(body)}</p><p class="muted">既存セーブへの上書きを停止しています。独立公開版やバックアップのJSONは削除しないでください。</p><div class="modal-actions">${allowRetry?'<button class="button" type="button" data-action="safe-retry">再読み込みして確認</button>':''}<button class="button secondary" type="button" data-action="safe-import">JSONバックアップを読み込む</button><button class="button secondary" type="button" data-action="safe-export-local">残っている保存データを退避</button><a class="button secondary" href="../../recovery.html" style="text-decoration:none">データ救出画面へ</a></div><input id="safe-import-file" type="file" accept=".json,application/json" class="hidden"></section>`;
+    loaded=false;saveAllowed=false;databaseReadVerified=false;
+    const node=$('#main');if(node)node.innerHTML=`<section class="panel" style="margin:20px 0;padding:20px"><h2>${esc(title)}</h2><p>${esc(body)}</p><p class="muted">既存セーブへの上書きを停止しています。独立公開版やバックアップのJSONは削除しないでください。</p><div class="modal-actions">${allowRetry?'<button class="button" type="button" data-action="safe-retry">再読み込みして確認</button>':''}<button class="button secondary" type="button" data-action="safe-import">JSONバックアップを読み込む</button><button class="button secondary" type="button" data-action="safe-export-local">残っているセーブデータを退避</button><a class="button secondary" href="../../recovery.html" style="text-decoration:none">データ救出画面へ</a></div><input id="safe-import-file" type="file" accept=".json,application/json" class="hidden"></section>`;
   }
-  async function initStorage(){
-    // Give WebKit's IndexedDB a bounded time to start. A hung open used to leave
-    // the game's main panel empty forever on some PWA reentries.
+  function localSnapshot(){
+    const out={local:null,backup:null,rawWasPresent:false,storageReadable:false,readError:''};
     try{
-      const opening=new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,1);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('saves'))req.result.createObjectStore('saves')};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||Error('IndexedDB failed'));req.onblocked=()=>reject(Error('IndexedDB is blocked'))});
-      idb=await Promise.race([opening,new Promise((_,reject)=>setTimeout(()=>reject(Error('IndexedDB timeout')),4800))]);storageOpenStatus='ready';
-    }catch(e){idb=null;storageOpenStatus=String(e?.message||e);}
+      const raw=localStorage.getItem(SAVE_KEY), backupRaw=localStorage.getItem(SAFE_KEY);
+      out.storageReadable=true;
+      out.rawWasPresent=raw!==null||backupRaw!==null;
+      out.local=validSave(raw);out.backup=validSave(backupRaw);
+    }catch(e){out.readError='ローカル保存領域を読み取れませんでした: '+String(e?.message||e);}
+    return out;
   }
-  async function inspectSave(){
-    let local=null,backup=null,database=null,storageReadable=false,dbReadable=false,rawWasPresent=false;
-    try{
-      const raw=localStorage.getItem(SAVE_KEY),backupRaw=localStorage.getItem(SAFE_KEY);
-      storageReadable=true;rawWasPresent=raw!==null||backupRaw!==null;
-      local=parseSave(raw);backup=parseSave(backupRaw);
-    }catch(e){storageIssue='ローカル保存領域を読み取れませんでした: '+String(e?.message||e);}
-    if(idb){try{database=await new Promise((resolve,reject)=>{const tx=idb.transaction('saves','readonly');const req=tx.objectStore('saves').get(SAVE_KEY);req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error||Error('read failure'))});dbReadable=true;}catch(e){storageIssue='IndexedDBのセーブを読めませんでした: '+String(e?.message||e);}}
-    const candidates=[local,backup,database].filter(v=>{if(!isSaveShape(v))return false;try{sanitize(v);return true;}catch(_){return false;}});
-    candidates.sort((a,b)=>(Number(b.savedAt)||0)-(Number(a.savedAt)||0));
-    const winner=candidates[0]||null;
-    // Detect a newly reset/empty copy shadowing a substantially progressed save.
-    // Do not guess which copy is correct: leave both sources untouched for recovery.
+  function initStorage(maxWait){
+    // Clear the timer and close an IndexedDB connection that arrives after timeout.
+    return new Promise(resolve=>{
+      let finished=false,request,timer;
+      const done=(db,status)=>{
+        if(finished){try{db?.close();}catch(_){}return;}
+        finished=true;clearTimeout(timer);idb=db;storageOpenStatus=status;resolve();
+      };
+      try{
+        if(!('indexedDB' in window))return done(null,'IndexedDB unavailable');
+        request=indexedDB.open(DB_NAME,1);
+        request.onupgradeneeded=()=>{if(!request.result.objectStoreNames.contains('saves'))request.result.createObjectStore('saves');};
+        request.onsuccess=()=>done(request.result,'ready');
+        request.onerror=()=>done(null,String(request.error||'IndexedDB open failed'));
+        request.onblocked=()=>done(null,'IndexedDB open blocked');
+        timer=setTimeout(()=>done(null,'IndexedDB open timed out'),maxWait);
+      }catch(e){done(null,String(e?.message||e));}
+    });
+  }
+  function readDatabaseSave(maxWait){
+    if(!idb)return Promise.resolve({readable:false,data:null,error:storageOpenStatus});
+    return new Promise(resolve=>{
+      let finished=false,timer;
+      const done=(readable,data,error='')=>{
+        if(finished)return;
+        finished=true;clearTimeout(timer);resolve({readable,data,error});
+      };
+      try{
+        const tx=idb.transaction('saves','readonly');
+        const req=tx.objectStore('saves').get(SAVE_KEY);
+        req.onsuccess=()=>done(true,req.result||null);
+        req.onerror=()=>done(false,null,String(req.error||'IndexedDB read failed'));
+        tx.onabort=()=>done(false,null,String(tx.error||'IndexedDB read aborted'));
+        timer=setTimeout(()=>done(false,null,'IndexedDB read timed out'),maxWait);
+      }catch(e){done(false,null,String(e?.message||e));}
+    });
+  }
+  async function inspectSave(local,readTimeout){
+    const db=await readDatabaseSave(readTimeout);
+    databaseReadVerified=db.readable;
+    const candidates=[local.local,local.backup,db.data].filter(Boolean);
+    // Each candidate is validated independently, including legacy / future save shape.
+    const usable=candidates.filter(v=>validSave(v)!==null);
+    usable.sort((a,b)=>(Number(b.savedAt)||0)-(Number(a.savedAt)||0));
+    const winner=usable[0]||null;
     const progressScore=v=>Math.max(0,Number(v.elapsed)||0)/3600+Math.max(0,Number(v.peakPopulation||v.population)||0)/8+Math.max(0,Number(v.stats?.builds)||0)*5+Math.max(0,Number(v.stats?.technologies)||0)*40+Math.max(0,Number(v.prestige?.runs)||0)*150+Math.max(0,(v.technologies||[]).length)*35;
-    if(winner && candidates.some(other=>other!==winner && progressScore(other)>progressScore(winner)*2+25 && (Number(other.savedAt)||0)<(Number(winner.savedAt)||0)))return {error:'新しいセーブより進行度が高い古いセーブが見つかりました。自動上書きを停止しました。救出画面で双方をバックアップし、どちらを採用するか確認してください。',winner:null};
-    // Malformed primary data must remain available to forensic recovery.
-    if(!winner && (rawWasPresent||database!==null))return {error:'保存データを確認できません。破損または一時的なアクセス不良の可能性があります。',winner:null};
-    if(!winner && !storageReadable && !dbReadable)return {error:'端末の保存領域にアクセスできません。',winner:null};
-    if(!winner && storageOpenStatus!=='ready')return {error:'IndexedDBの開始を確認できません。初期セーブで上書きしないため停止しました。',winner:null};
+    if(winner&&usable.some(other=>other!==winner&&progressScore(other)>progressScore(winner)*2+25&&(Number(other.savedAt)||0)<(Number(winner.savedAt)||0)))return {error:'新しいセーブより進行度が高い古いセーブが見つかりました。自動上書きを停止しました。救出画面で双方をバックアップし、どちらを採用するか確認してください。',winner:null};
+    // A healthy local copy can be auto-loaded when iOS IndexedDB is slow/stuck.
+    // Crucially, don't write to an unverified IndexedDB store in that session.
+    if(winner&&!db.readable)storageIssue='IndexedDBを確認できなかったため、今回はローカルコピーのみ保存します。';
+    if(!winner&&(local.rawWasPresent||db.data!==null))return {error:'セーブデータを確認できません。破損または一時的なアクセス不良の可能性があります。',winner:null};
+    if(!winner&&!local.storageReadable&&!db.readable)return {error:'端末の保存領域にアクセスできません。',winner:null};
+    if(!winner&&!db.readable)return {error:'IndexedDBの確認が完了しませんでした。既存データを上書きしないため初期化せず停止しました。',winner:null};
     return {winner,error:''};
   }
   async function save(){
@@ -243,7 +284,7 @@ pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
       if(previous&&parseSave(previous))localStorage.setItem(SAFE_KEY,previous);
       localStorage.setItem(SAVE_KEY,payload);localOK=true;
     }catch(e){storageIssue='ローカル保存に失敗しました: '+String(e?.message||e);}
-    if(idb){try{await new Promise((resolve,reject)=>{const tx=idb.transaction('saves','readwrite');tx.objectStore('saves').put(JSON.parse(payload),SAVE_KEY);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||Error('save failed'));tx.onabort=()=>reject(tx.error||Error('save aborted'))});return true;}catch(e){storageIssue='IndexedDB保存に失敗しました: '+String(e?.message||e);}}
+    if(idb&&databaseReadVerified){try{await new Promise((resolve,reject)=>{const tx=idb.transaction('saves','readwrite');tx.objectStore('saves').put(JSON.parse(payload),SAVE_KEY);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||Error('save failed'));tx.onabort=()=>reject(tx.error||Error('save aborted'))});return true;}catch(e){storageIssue='IndexedDB保存に失敗しました: '+String(e?.message||e);}}
     if(!localOK){toast('保存できません。バックアップを書き出してください。');}
     return localOK;
   }
@@ -256,13 +297,15 @@ pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
     case'prestige-confirm':if(state.era==='industrial'){const awarded=prestigeAward();const old=state.prestige;state=createInitialState();state.prestige=normalizePrestige(old);state.prestige.points+=awarded;state.prestige.earned+=awarded;state.prestige.runs++;log('前文明の遺産 '+awarded+' pt を引き継ぎ、新しい文明が誕生した。');activeTab='home';onAction();openModal('prestige-allocate')}break;
     case'prestige-upgrade':if(['industry','growth','click'].includes(el.dataset.perk)){const key=el.dataset.perk,cost=prestigeUpgradeCost(key);if(state.prestige.points>=cost){state.prestige.points-=cost;state.prestige.upgrades[key]++;onAction({render:false});openModal('prestige-allocate')}}break;
     case'prestige-finish':closeModal();navigate('home');save();break;
-    case'safe-retry':location.reload();break;case'safe-import':$('#safe-import-file')?.click();break;case'safe-export-local':exportLocalRecovery();break;case'settings':openModal('settings');break;case'refresh-game':save();window.location.replace(window.location.pathname+'?update='+Date.now());break;case'close-modal':closeModal();break;case'export':exportSave();break;case'import':$('#import-file').click();break;case'reset-prompt':openModal('reset');break;case'reset-confirm':state=createInitialState();closeModal();activeTab='home';onAction();toast('新しい文明が始まりました。');break;case'focus':state.focus=el.dataset.focus;log('文明の方針として「'+(state.focus==='food'?'豊穣':'探究')+'」を選んだ。');closeModal();onAction();break;}});document.body.addEventListener('change',e=>{if(e.target.id==='import-file'||e.target.id==='safe-import-file')importSave(e.target.files[0]);});document.addEventListener('visibilitychange',()=>{if(document.hidden)save();else{let now=Date.now();let gap=Math.max(0,(now-lastFrame)/1000);if(gap>3){const before={...state.resources};advance(Math.min(MAX_OFFLINE,gap));state.savedAt=now;evaluateMilestones();render();if(gap>20){offlineReal=gap;offlineDiff=Object.keys(RESOURCE).map(k=>[k,state.resources[k]-before[k]]);openModal('offline')}}lastFrame=now;tickAccumulator=0}});window.addEventListener('pagehide',()=>{save()});document.getElementById('toolbox-home')?.addEventListener('click',()=>{save()})}
+    case'safe-retry':location.reload();break;case'safe-import':$('#safe-import-file')?.click();break;case'safe-export-local':exportLocalRecovery();break;case'settings':openModal('settings');break;case'refresh-game':save();window.location.replace(window.location.pathname+'?update='+Date.now());break;case'close-modal':closeModal();break;case'export':exportSave();break;case'import':$('#import-file').click();break;case'reset-prompt':openModal('reset');break;case'reset-confirm':state=createInitialState();closeModal();activeTab='home';onAction();toast('新しい文明が始まりました。');break;case'focus':state.focus=el.dataset.focus;log('文明の方針として「'+(state.focus==='food'?'豊穣':'探究')+'」を選んだ。');closeModal();onAction();break;}});document.body.addEventListener('change',e=>{if(e.target.id==='import-file'||e.target.id==='safe-import-file')importSave(e.target.files[0]);});document.addEventListener('visibilitychange',()=>{if(!loaded)return;if(document.hidden)save();else{let now=Date.now();let gap=Math.max(0,(now-lastFrame)/1000);if(gap>3){const before={...state.resources};advance(Math.min(MAX_OFFLINE,gap));state.savedAt=now;evaluateMilestones();render();if(gap>20){offlineReal=gap;offlineDiff=Object.keys(RESOURCE).map(k=>[k,state.resources[k]-before[k]]);openModal('offline')}}lastFrame=now;tickAccumulator=0}});window.addEventListener('pagehide',()=>{save()});document.getElementById('toolbox-home')?.addEventListener('click',()=>{save()})}
   let tickAccumulator=0;function loop(now){let wall=Date.now();let delta=Math.max(0,(wall-lastFrame)/1000);lastFrame=wall;if(loaded){if(!document.hidden){tickAccumulator+=Math.min(delta,5);while(tickAccumulator>=1){advance(1);tickAccumulator-=1;}}if(wall-renderAt>=1000){$('#resources').innerHTML=resourceHTML();renderAt=wall}if(wall-mainRenderAt>=5000&&wall>interactingUntil){render();mainRenderAt=wall}if(wall-lastFloatAt>=2600&&activeTab==='buildings'&&!document.hidden){lastFloatAt=wall;const rates=getRates();for(const card of document.querySelectorAll('.shop-card[data-building-card]')){const id=card.dataset.buildingCard;const b=BUILDINGS.find(x=>x.id===id);if(!b||!state.buildings[id])continue;const resource=({forage_hut:'food',lumberyard:'wood',archive:'knowledge',farm:'food'})[id];if(resource&&rates[resource]>0)floatAt(card,'+'+n(rates[resource]*2.6)+' '+RESOURCE[resource].name)}}if(wall-autoSaveAt>10000){save();autoSaveAt=wall}}requestAnimationFrame(loop)}
   async function boot(){
     bindEvents();
-    if($('#main'))$('#main').innerHTML='<section class="panel"><p>保存データを確認中です…</p></section>';
-    await initStorage();
-    const inspected=await inspectSave();
+    if($('#main'))$('#main').innerHTML='<section class="panel"><p>セーブデータを確認中です…</p></section>';
+    const local=localSnapshot();
+    const hasLocalCopy=!!(local.local||local.backup);
+    await initStorage(hasLocalCopy?FAST_OPEN_WAIT:SLOW_OPEN_WAIT);
+    const inspected=await inspectSave(local,hasLocalCopy?FAST_READ_WAIT:SLOW_READ_WAIT);
     if(inspected.error){storageNotice('セーブの安全確認が必要です',inspected.error);return;}
     if(inspected.winner){
       try{
@@ -277,5 +320,5 @@ pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
     evaluateMilestones();loaded=true;saveAllowed=true;lastFrame=Date.now();autoSaveAt=lastFrame;render();if(offlineReal>20)openModal('offline');requestAnimationFrame(loop);
   }
   window.__civilizationGame={getState:()=>structuredClone(state),getRates:()=>getRates(),loadForTest:raw=>{state=sanitize(raw);evaluateMilestones();render()},advanceForTest:seconds=>{advance(seconds);evaluateMilestones();render()},version:VERSION};
-  boot();
+  boot().catch(e=>storageNotice('セーブの確認が完了しませんでした',String(e?.message||e)));
 })();
