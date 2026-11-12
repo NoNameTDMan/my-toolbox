@@ -6,7 +6,7 @@
  */
 (()=>{
   'use strict';
-  const VERSION='0.6.0';
+  const VERSION='0.6.1';
   const SAVE_KEY='civilization-seed-save-v1';
   const SAFE_KEY=SAVE_KEY+'-last-good';
   const GAME_RECOVERY_VERSION='1.1.4';
@@ -124,16 +124,108 @@
       const added=Math.min(desired,currentCap-s.population,affordable);
       if(added>0){s.resources.food-=added*costPerPerson;s.population+=added;s.peakPopulation=Math.max(s.peakPopulation,s.population);if(s.governor)applyPreset('balanced',true)}
     }
-    if(s.governor&&s.governorTimer>=10){s.governorTimer%=10;applyPreset('balanced',true)}if(s.autoBuilder&&s.autoBuilderTimer>=1){s.autoBuilderTimer%=1;const eligible=BUILDINGS.filter(b=>isUnlocked(b)&&s.autoBuildings[b.id]===true);
-const affordable=eligible.filter(b=>canBuy(buildingCost(b),s));
-if(affordable.length){
-let chosen=affordable[0],highest=-Infinity;
-for(const candidate of affordable){
-const total=Object.values(buildingCost(candidate)).reduce((sum,value)=>sum+value,0);
-if(total>highest){highest=total;chosen=candidate}
-}
-pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
+    if(s.governor&&s.governorTimer>=10){s.governorTimer%=10;applyPreset('balanced',true)}if(s.autoBuilder&&s.autoBuilderTimer>=1){s.autoBuilderTimer%=1;const chosen=balancedBuildingChoice(s);
+if(chosen){pay(buildingCost(chosen,s));s.buildings[chosen.id]++;s.stats.builds++;
+  if(s.governor)applyPreset('balanced',true);
 }}if(s.autoExplore&&s.autoExploreTimer>=3&&s.expeditionCharges>0){s.autoExploreTimer%=3;const candidates=[{id:'forest',r:['wood','food']},{id:'river',r:['food','knowledge']},{id:'ruin',r:['knowledge','stone']}];const target=candidates.map(x=>({id:x.id,score:Math.min(...x.r.map(k=>s.resources[k]/(k==='knowledge'?80:150)))})).sort((a,b)=>a.score-b.score)[0];const rewards={forest:{wood:26,food:12},river:{food:35,knowledge:6},ruin:{knowledge:14,stone:5}};s.expeditionCharges--;gain(rewards[target.id]);s.stats.explorations++;}}}
+  // Production balancing uses upcoming costs, current stock and the rate of each resource.
+  // The food target includes consumption; wood and stone are intentionally protected
+  // against knowledge/food production outrunning construction materials.
+  function resourcePressure(s=state,rates=getRates(s)){
+    const needed={food:0,wood:0,stone:0,knowledge:0};
+    const options=[...BUILDINGS.filter(b=>isUnlocked(b)&&s.autoBuildings[b.id]!==false).map(b=>buildingCost(b,s)),
+      ...TECHS.filter(t=>!s.technologies.includes(t.id)&&t.req.every(id=>s.technologies.includes(id))).map(t=>t.cost)];
+    for(const cost of options)for(const k of Object.keys(needed))needed[k]=Math.max(needed[k],Number(cost[k])||0);
+    const pressure={};
+    for(const k of Object.keys(needed)){
+      const rate=Math.max(0,Number(rates[k])||0);
+      const stock=Math.max(0,Number(s.resources[k])||0);
+      const target=Math.max(k==='food'?100:35,needed[k]);
+      const stockCoverage=stock/target;
+      const rateCoverage=rate/Math.max(1,target/45);
+      // Stock can cover a near-term purchase, but a zero production chain
+      // must still be bootstrapped (especially quarry/miner).
+      const scarcity=1/(0.22+Math.sqrt(Math.max(0,stockCoverage)));
+      const flow=1/(0.2+Math.sqrt(Math.max(0,rateCoverage)));
+      pressure[k]=Math.min(35,(scarcity*.55+flow*.45)*(k==='wood'||k==='stone'?1.55:1));
+    }
+    if(rates.food<0||s.resources.food<Math.max(100,Math.abs(rates.food)*20))pressure.food=Math.max(pressure.food,12);
+    if(rates.stone<=0&&s.technologies.includes('stone_tools'))pressure.stone=Math.max(pressure.stone,18);
+    if(rates.wood<=0)pressure.wood=Math.max(pressure.wood,18);
+    return pressure;
+  }
+  function balancedJobAllocation(s=state){
+    const allocation=Object.fromEntries(JOBS.map(j=>[j.id,0]));
+    const simulated={...s,jobs:allocation};
+    const enabled=JOBS.filter(j=>isUnlocked(j)&&jobMax(j.id,s)>0);
+    let remaining=s.population;
+    // Greedy marginal improvement, allocated in bounded batches for large populations.
+    // Recompute the marginal output after each batch so bottlenecks can change.
+    for(let pass=0;pass<18&&remaining>0;pass++){
+      const rates=getRates(simulated),pressure=resourcePressure(s,rates);
+      let best=null,bestScore=-Infinity;
+      for(const job of enabled){
+        const room=jobMax(job.id,s)-allocation[job.id];if(room<=0)continue;
+        const sample=Math.max(1,Math.min(room,Math.ceil(Math.min(remaining,Math.max(1,s.population/60)))));
+        allocation[job.id]+=sample;
+        const next=getRates(simulated);
+        allocation[job.id]-=sample;
+        let score=0;
+        for(const k of ['food','wood','stone','knowledge']){
+          const gain=Math.max(0,next[k]-rates[k])/sample;
+          const scale=Math.max(1,Math.abs(rates[k])*.015);
+          score+=pressure[k]*gain/scale;
+        }
+        if(score>bestScore){bestScore=score;best=job}
+      }
+      if(!best)break;
+      const room=jobMax(best.id,s)-allocation[best.id];
+      const batch=Math.min(remaining,room,Math.max(1,Math.ceil(remaining/Math.max(1,12-pass))));
+      allocation[best.id]+=batch;remaining-=batch;
+    }
+    // Never lose population: assign any residual workers to an unlimited occupation.
+    if(remaining>0)allocation.forage+=remaining;
+    return allocation;
+  }
+  function balancedBuildingChoice(s=state){
+    const eligible=BUILDINGS.filter(b=>isUnlocked(b)&&s.autoBuildings[b.id]===true&&canBuy(buildingCost(b,s),s));
+    if(!eligible.length)return null;
+    const before=getRates(s),pressure=resourcePressure(s,before);
+    let best=null,bestScore=-Infinity;
+    for(const b of eligible){
+      const cost=buildingCost(b,s);
+      const candidate={...s,buildings:{...s.buildings,[b.id]:s.buildings[b.id]+1},jobs:{...s.jobs}};
+      // Quarry is useful because it unlocks miners, not because it directly produces stone.
+      if(b.id==='quarry'&&s.technologies.includes('stone_tools')){
+        const available=Math.max(0,s.population-assigned(s));
+        const moved=Math.min(4,Math.max(1,Math.ceil(s.population*.08)),available+Math.min(s.jobs.forage,4));
+        candidate.jobs.miner+=moved;candidate.jobs.forage=Math.max(0,candidate.jobs.forage-Math.max(0,moved-available));
+      }
+      if(b.id==='farm'&&s.technologies.includes('seeds')){
+        const moved=Math.min(5,Math.max(0,s.population-assigned(s))+Math.min(s.jobs.forage,5));
+        candidate.jobs.farmer+=moved;candidate.jobs.forage=Math.max(0,candidate.jobs.forage-Math.max(0,moved-(s.population-assigned(s))));
+      }
+      const after=getRates(candidate);
+      let benefit=0;
+      for(const k of ['food','wood','stone','knowledge']){
+        const increase=Math.max(0,after[k]-before[k]);
+        benefit+=pressure[k]*increase/Math.max(1,Math.abs(before[k])*.035);
+      }
+      // Housing has no direct production rate; preserve the population growth loop.
+      const capacity=cap(s),newCapacity=cap(candidate);
+      if(newCapacity>capacity){
+        const free=capacity-s.population;
+        benefit+=free<=Math.max(3,s.population*.06)?18:free<=s.population*.2?5:0.25;
+      }
+      if(b.id==='quarry'&&before.stone<=0)benefit+=50;
+      if(b.id==='lumberyard'&&before.wood<=0)benefit+=30;
+      // Small price penalty; prioritize actual bottleneck removal, not maximum price.
+      const relativeCost=Object.entries(cost).reduce((v,[k,amount])=>v+amount/Math.max(1,s.resources[k]),0);
+      const score=benefit/(1+relativeCost*.12);
+      if(score>bestScore){bestScore=score;best=b}
+    }
+    return best;
+  }
   function timeLabel(seconds){const h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=Math.floor(seconds%60);return h?`${h}時間${m}分`:m?`${m}分${s}秒`:`${s}秒`}
   function costHTML(cost){return Object.entries(cost).map(([key,value])=>`<span class="${state.resources[key]+1e-8<value?'lacking':''}">${RESOURCE[key].name} ${n(value)}</span>`).join(' ・ ')}
   function headerHTML(title,sub,detail=''){return `<div class="view-head"><div><h1>${title}</h1><p>${sub}</p></div>${detail}</div>`}
@@ -147,7 +239,7 @@ pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
   <div class="layout-two"><div class="stack">${state.era==='industrial'?`<div class="panel"><h2>文明の転生が可能です</h2><p class="small muted">転生すると恒久強化ポイント ${prestigeAward()} pt を獲得します。</p><button class="button wide" data-action="prestige-start">文明を転生させる</button></div>`:''}${villageScene()}<div class="panel click-panel"><div class="panel-title"><h2>手動採集</h2><span class="tag green">回数制限なし</span></div><div class="click-grid">${['food','wood','stone','knowledge'].map(id=>`<button class="click-tile" data-action="click-gather" data-resource="${id}"><span class="click-art">${({food:'🌾',wood:'🌳',stone:'🪨',knowledge:'📜'})[id]}</span><strong>${RESOURCE[id].name}</strong><small>タップして +${Math.round(({food:8,wood:6,stone:2,knowledge:3})[id]*(Math.pow(1.55,state.clickLevel)*Math.pow(1.7,perk('click'))))}</small></button>`).join('')}</div><div class="click-upgrade"><div><strong>採集強化 Lv.${state.clickLevel}</strong><small>タップ獲得量 ×${(Math.pow(1.55,state.clickLevel)*Math.pow(1.7,perk('click'))).toFixed(2)} / 次の強化：${costHTML(clickUpgradeCost())}</small></div><button class="mini-btn" data-action="click-upgrade" ${canBuy(clickUpgradeCost())?'':'disabled'}>強化</button></div></div><div class="panel"><div class="panel-title"><h2>探索と発見</h2><span class="tag ${state.expeditionCharges?'green':'gray'}">探索力 ${state.expeditionCharges} / 3</span></div><p class="small muted" style="margin:0 0 13px">探索力は22秒ごとに1回復します。クリック採集は何度でも可能です。</p><div class="automation-inline"><span>不足資源を優先して自動探索</span><button class="mini-btn ${state.autoExplore?'':'secondary'}" data-action="auto-explore">${state.autoExplore?'ON':'OFF'}</button></div><div class="explore-grid"><button class="explore-option" data-action="explore" data-target="forest" ${!state.expeditionCharges?'disabled':''}><span class="emoji">🌲</span><strong>森を探索</strong><small>木材・食料</small></button><button class="explore-option" data-action="explore" data-target="river" ${!state.expeditionCharges?'disabled':''}><span class="emoji">🏞️</span><strong>川を探索</strong><small>食料・知識</small></button><button class="explore-option" data-action="explore" data-target="ruin" ${!state.expeditionCharges?'disabled':''}><span class="emoji">🏺</span><strong>遺跡を探索</strong><small>知識・石材</small></button></div></div><div class="panel"><div class="panel-title"><h2>文明の発展</h2><span class="tag">${eraProgress}%</span></div><div class="progress-track"><span style="width:${eraProgress}%"></span></div><p class="small muted" style="margin:12px 0 10px">${target?eraName()+' → '+TECHS.find(t=>t.id===target).name+'　'+chain.filter(t=>has(t.id)).length+' / '+chain.length+' の研究':'工業時代へ到達！'}</p>${!target?'<div class="end-of-demo">工業時代へ到達！ 次の時代は今後追加予定です。自動化と生産をさらに強化できます。</div>':`<div class="notice">次の研究：<b>${tech?tech.name:'研究を進めよう'}</b><br>${tech?tech.hint:'研究画面で技術を選んでください。'}</div>`}</div></div>
   <div class="stack">${missionHTML()}<div class="panel"><div class="panel-title"><h2>集落の状況</h2><span class="tag green">稼働中</span></div><div class="info-row"><span>人口 / 定員</span><strong>${n(state.population)} / ${n(cap())}人</strong></div><div class="info-row"><span>待機中の住民</span><strong>${n(state.population-assigned())}人</strong></div><div class="info-row"><span>食料消費</span><strong>−${n(r.foodUse)} / 秒</strong></div><div class="info-row"><span>食料収支</span><strong class="${r.food>=0?'good':'bad'}">${fmtSigned(r.food)} / 秒</strong></div><div class="info-row"><span>建築した施設</span><strong>${Object.values(state.buildings).reduce((a,b)=>a+b,0)}棟</strong></div><div class="section-spacer"></div><button class="button wide" data-nav="people">住民の仕事を調整 →</button></div><div class="panel"><div class="panel-title"><h2>これから解放されるもの</h2></div><div class="chips"><span class="chip ${has('stone_tools')?'active':''}">⛏ 石材</span><span class="chip ${has('seeds')?'active':''}">🌾 農業</span><span class="chip ${has('village')?'active':''}">⚖ 自動配置</span><span class="chip ${state.era==='agriculture'?'active':''}">☀ 農耕時代</span></div><div class="future-box">現在の画面では、未発見の要素を一部隠しています。研究が進むほど、新しい職業・施設・システムが登場します。</div></div></div></div>`}
   function renderPeople(){let idle=state.population-assigned(),max=cap();let growthCost=15+Math.floor(state.population*.9);let recruitCost=25+state.population*5;return `${headerHTML('住民の暮らし','誰を何の仕事に就けるかで、文明の成長速度が変わります。',`<span class="tag green">${state.population} / ${max} 人</span>`)}<div class="layout-two"><div class="stack"><div class="panel"><div class="panel-title"><h2>仕事の割り当て</h2><span class="tag ${idle?'green':'gray'}">待機 ${idle}人</span></div><div class="job-list">${JOBS.filter(isUnlocked).map(job=>{let limit=jobMax(job.id),amount=state.jobs[job.id],space=limit===Infinity?'無制限':limit;return `<div class="job"><div class="job-left"><span class="job-icon">${job.icon}</span><div class="job-info"><strong>${job.name}</strong><small>${job.hint} · 上限${space}</small></div></div><div class="job-controls"><button class="step-btn" data-action="job" data-job="${job.id}" data-delta="-1" aria-label="${job.name}を1人減らす" ${amount<=0?'disabled':''}>−</button><span class="qty">${amount}</span><button class="step-btn" data-action="job" data-job="${job.id}" data-delta="1" aria-label="${job.name}を1人増やす" ${idle<=0||amount>=limit?'disabled':''}>＋</button></div></div>`}).join('')}</div><p class="small muted" style="line-height:1.7">配分の変更は無料です。職業を減らして待機者を作り、別の職業へ配置できます。</p><div class="preset-row"><button class="mini-btn secondary" data-action="preset" data-preset="balanced">均等に配分</button><button class="mini-btn secondary" data-action="preset" data-preset="food">食料重視</button><button class="mini-btn secondary" data-action="preset" data-preset="knowledge">研究重視</button></div></div></div><div class="stack"><div class="panel"><h2>新しい住民</h2><p class="small muted" style="line-height:1.7">住居があると、食料を使いながら自然に人口が増えます。手動で住民を迎えることもできます。</p><div class="info-row"><span>人口</span><strong>${state.population} / ${max}人</strong></div><div class="info-row"><span>自然増加まで</span><strong>${timeLabel(Math.max(0,(state.focus==='food'?24:34)-state.growthTimer))}</strong></div><div class="info-row"><span>自然増加コスト</span><strong>食料 ${n(growthCost)}</strong></div><div class="section-spacer"></div><button class="button wide" data-action="recruit" ${state.population>=max||state.resources.food<recruitCost?'disabled':''}>住民を迎え入れる ・食料 ${n(recruitCost)}</button>${state.population>=max?'<p class="small muted">住居を建設すると、人口上限が増えます。</p>':''}</div><div class="panel"><div class="panel-title"><h2>集落の統治</h2><span class="tag ${has('village')?'green':'gray'}">利用可能</span></div><p class="small muted" style="line-height:1.7">最初から利用可能。クリック採集と組み合わせて、序盤から自動化できます。</p><button class="button wide ${state.governor?'secondary':''}" data-action="governor" >${state.governor?'自動配置を停止する':'自動配置を有効にする'}</button><p class="tiny muted">自動配置は食料収支を見ながら、食料・木材・知識・石材をバランスよく配分します。</p></div></div></div>`}
-  function renderBuildings(){return `${headerHTML('施設の建築','集落を拡張し、生産を強化しましょう。',`<span class="tag">${Object.values(state.buildings).reduce((a,b)=>a+b,0)} 棟</span>`)}<div class="panel auto-panel"><div class="panel-title"><h2>施設の自動購入</h2><span class="tag green">初期解放</span></div><p class="small muted">1秒ごとに、ONの施設のうち購入可能で資源消費合計が最大の施設を1棟購入します。各施設のON/OFFは下のカードで設定できます。</p><button class="button ${state.autoBuilder?'secondary':''}" data-action="auto-builder">${state.autoBuilder?'自動購入：ON（停止する）':'自動購入：OFF（開始する）'}</button></div><div class="cards">${BUILDINGS.filter(isUnlocked).map(b=>{let cost=buildingCost(b);let affordable=canBuy(cost);return `<div class="shop-card" data-building-card="${b.id}"><div class="card-head"><div class="card-icon facility-art">${b.icon}</div><div class="card-title"><strong>${b.name}</strong><small class="effect-inline">${b.detail}</small><small>建設済み ${state.buildings[b.id]}棟</small></div><span class="tag gray">Lv. ${state.buildings[b.id]}</span></div><details class="card-details" data-detail="b-${b.id}"><summary>詳細・生産効果</summary><p>${b.desc}<br><span class="good">${b.detail}</span></p></details><div class="card-foot"><div class="cost">${costHTML(cost)}</div><button class="mini-btn ${!affordable?'secondary':''}" data-action="build" data-building="${b.id}" ${affordable?'':'disabled'}>建築</button><button class="mini-btn ${state.autoBuildings[b.id]===true?'auto-on':'secondary'}" data-action="toggle-auto-building" data-building="${b.id}" aria-pressed="${state.autoBuildings[b.id]===true}">自動 ${state.autoBuildings[b.id]===false?'OFF':'ON'}</button></div></div>`}).join('')}</div><div class="future-box">施設の費用は建築数に応じて上昇します。同じ施設を増やすか、新しい研究を進めるかも重要な選択です。資源の保管上限：なし（倉庫は生産量を強化）</div>`}
+  function renderBuildings(){return `${headerHTML('施設の建築','集落を拡張し、生産を強化しましょう。',`<span class="tag">${Object.values(state.buildings).reduce((a,b)=>a+b,0)} 棟</span>`)}<div class="panel auto-panel"><div class="panel-title"><h2>施設の自動購入</h2><span class="tag green">初期解放</span></div><p class="small muted">1秒ごとに資源の不足度と生産改善効果を評価し、最も効果的な購入可能施設を1棟購入します。各施設のON/OFFは下のカードで設定できます。</p><button class="button ${state.autoBuilder?'secondary':''}" data-action="auto-builder">${state.autoBuilder?'自動購入：ON（停止する）':'自動購入：OFF（開始する）'}</button></div><div class="cards">${BUILDINGS.filter(isUnlocked).map(b=>{let cost=buildingCost(b);let affordable=canBuy(cost);return `<div class="shop-card" data-building-card="${b.id}"><div class="card-head"><div class="card-icon facility-art">${b.icon}</div><div class="card-title"><strong>${b.name}</strong><small class="effect-inline">${b.detail}</small><small>建設済み ${state.buildings[b.id]}棟</small></div><span class="tag gray">Lv. ${state.buildings[b.id]}</span></div><details class="card-details" data-detail="b-${b.id}"><summary>詳細・生産効果</summary><p>${b.desc}<br><span class="good">${b.detail}</span></p></details><div class="card-foot"><div class="cost">${costHTML(cost)}</div><button class="mini-btn ${!affordable?'secondary':''}" data-action="build" data-building="${b.id}" ${affordable?'':'disabled'}>建築</button><button class="mini-btn ${state.autoBuildings[b.id]===true?'auto-on':'secondary'}" data-action="toggle-auto-building" data-building="${b.id}" aria-pressed="${state.autoBuildings[b.id]===true}">自動 ${state.autoBuildings[b.id]===false?'OFF':'ON'}</button></div></div>`}).join('')}</div><div class="future-box">施設の費用は建築数に応じて上昇します。同じ施設を増やすか、新しい研究を進めるかも重要な選択です。資源の保管上限：なし（倉庫は生産量を強化）</div>`}
   function visibleTech(t){if(has(t.id))return true;if(!t.req.length)return true;if(t.req.every(id=>has(id)))return true;if(t.req.some(id=>has(id)))return true;return false}
   function renderResearch(){let available=TECHS.filter(t=>!has(t.id)&&t.req.every(id=>has(id)));let researched=TECHS.filter(t=>has(t.id));let others=TECHS.filter(t=>!has(t.id)&&visibleTech(t)&&!available.includes(t));let techCard=(t,done)=>{let ready=t.req.every(id=>has(id)),requirement=techRequirementText(t),affordable=canBuy(t.cost),locked=!ready||!!requirement;return `<div class="shop-card ${locked?'locked':''}"><div class="card-head"><div class="card-icon">${t.icon}</div><div class="card-title"><strong>${t.name}</strong><small class="effect-inline">${t.hint}</small><small>${done?'研究済み':locked?'前提技術が必要':t.special?'時代の転換点':'新しい発見'}</small></div><span class="tag ${done?'green':locked?'gray':''}">${done?'完了':locked?'未解放':'発見'}</span></div><details class="card-details" data-detail="t-${t.id}"><summary>詳細・研究効果</summary><p>${t.desc}<br><span class="good">${t.hint}</span></p></details><div class="card-foot"><div class="cost">${done?'知識は文明の資産になる':costHTML(t.cost)}${locked?`<br>必要：${[...t.req.filter(id=>!has(id)).map(id=>TECHS.find(z=>z.id===id).name),requirement].filter(Boolean).join('・')}`:''}</div>${done?'<span class="tag green">✓</span>':`<button class="mini-btn ${!affordable?'secondary':''}" data-action="research" data-tech="${t.id}" ${locked||!affordable?'disabled':''}>研究</button>`}</div></div>`};return `${headerHTML('技術と発見','知識を積み重ねることで、文明の可能性が広がります。',`<span class="tag green">知識 ${n(state.resources.knowledge)}</span>`)}<div class="panel" style="margin-bottom:15px"><div class="panel-title"><h2>研究できる技術</h2><span class="tag">${available.length} 件</span></div><div class="cards">${available.map(t=>techCard(t,false)).join('')||'<p class="small muted">新しく研究できる技術はありません。</p>'}</div></div>${others.length?`<div class="panel" style="margin-bottom:15px"><div class="panel-title"><h2>次の発見の気配</h2><span class="tag gray">前提技術を研究すると解放</span></div><div class="cards">${others.map(t=>techCard(t,false)).join('')}</div></div>`:''}<div class="panel"><div class="panel-title"><h2>発見の記録</h2><span class="tag green">${researched.length} 件</span></div>${researched.length?`<div class="cards">${researched.slice().reverse().map(t=>techCard(t,true)).join('')}</div>`:'<p class="small muted">最初の研究から文明の歴史が始まります。</p>'}</div>`}
   function renderHistory(){let rate=getRates(),logItems=state.history.slice().reverse();return `${headerHTML('文明の記録','これまでの成長と、これからの可能性。')}<div class="layout-two"><div class="stack"><div class="panel"><h2>年代記</h2>${logItems.slice(0,3).map(x=>`<div class="history-row"><time>${timeLabel(x.at)}</time><span>${esc(x.text)}</span></div>`).join('')}${logItems.length>3?`<details data-detail="history-old" class="card-details"><summary>過去の記録を表示（${logItems.length-3}件）</summary>${logItems.slice(3).map(x=>`<div class="history-row"><time>${timeLabel(x.at)}</time><span>${esc(x.text)}</span></div>`).join('')}</details>`:''}</div></div><div class="stack"><div class="panel"><h2>統計</h2><div class="info-row"><span>累計プレイ時間</span><strong>${timeLabel(state.elapsed)}</strong></div><div class="info-row"><span>探索回数</span><strong>${n(state.stats.explorations)} 回</strong></div><div class="info-row"><span>建築回数</span><strong>${n(state.stats.builds)} 回</strong></div><div class="info-row"><span>研究数</span><strong>${state.technologies.length}</strong></div><div class="info-row"><span>目標達成</span><strong>${state.missions.length} / ${MISSIONS.length}</strong></div></div><div class="panel"><h2>文明の転生</h2><p class="small muted">工業時代に到達すると転生できます。文明を最初からやり直し、恒久強化ポイントを獲得します。</p><div class="info-row"><span>転生回数</span><strong>${state.prestige.runs}</strong></div><div class="info-row"><span>保有ポイント</span><strong>${n(state.prestige.points)}</strong></div><div class="info-row"><span>今回の転生獲得予定</span><strong>${prestigeAward()} pt</strong></div><button class="button wide" data-action="prestige-start" ${state.era==='industrial'?'':'disabled'}>工業時代の文明を転生させる</button><button class="button secondary wide" data-action="prestige-allocate" style="margin-top:8px">転生ボーナスを管理</button></div><div class="panel"><h2>今後の時代</h2><p class="small muted" style="line-height:1.8">石器・農耕・都市・工業の4時代を実装しています。今後は情報・宇宙時代、転生による永続強化などを追加する予定です。</p></div><div class="panel"><h2>データ管理</h2><button class="button secondary wide" data-action="settings">セーブ・バックアップを開く</button></div></div></div>`}
@@ -155,10 +247,27 @@ pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
   function navigate(tab){if(!TABS.includes(tab))return;activeTab=tab;render();window.scrollTo({top:0,behavior:'instant'})}
   function explore(target){if(state.expeditionCharges<1){toast('探索力が足りません。少し時間をおきましょう。');return}let options={forest:{wood:26,food:12},river:{food:35,knowledge:6},ruin:{knowledge:14,stone:5}};if(!options[target])return;state.expeditionCharges--;gain(options[target]);state.stats.explorations++;const name={forest:'森',river:'川',ruin:'遺跡'}[target];log(name+'を探索し、資源を発見した。');toast(name+'の探索に成功！ '+Object.entries(options[target]).map(([id,val])=>RESOURCE[id].name+' +'+val).join('、'));onAction()}
   function assignJob(id,delta){let job=JOBS.find(j=>j.id===id);if(!job||!isUnlocked(job))return;if(delta>0&&(state.population-assigned()<1||state.jobs[id]>=jobMax(id)))return;if(delta<0&&state.jobs[id]<=0)return;state.jobs[id]+=delta;state.flags.allocated=true;state.governor=false;onAction()}
-  function applyPreset(preset,silent=false){const s=state;const weights=preset==='food'?{forage:5,wood:2,thinker:1,miner:1,farmer:3}:preset==='knowledge'?{forage:2,wood:2,thinker:5,miner:1,farmer:2}:{forage:4,wood:3,thinker:3,miner:2,farmer:3,artisan:2,engineer:2};const entries=JOBS.filter(isUnlocked).filter(x=>jobMax(x.id,s)>0);const allocated=Object.fromEntries(JOBS.map(j=>[j.id,0]));let remaining=s.population;const reserve=Math.min(remaining,Math.max(1,Math.ceil(remaining*.18)));allocated.forage=reserve;remaining-=reserve;
-    // Bounded proportional allocation: O(number of jobs), not O(population).
-    for(let pass=0;pass<3&&remaining>0;pass++){const options=entries.filter(j=>allocated[j.id]<jobMax(j.id,s));if(!options.length)break;const sum=options.reduce((v,j)=>v+(weights[j.id]||1),0);let granted=0;for(const j of options){const room=jobMax(j.id,s)-allocated[j.id];const take=Math.min(room,Math.floor(remaining*(weights[j.id]||1)/sum));allocated[j.id]+=take;granted+=take}remaining-=granted;if(!granted){for(const j of options){if(!remaining)break;allocated[j.id]++;remaining--}}}
-    s.jobs=allocated;if(!silent){s.flags.allocated=true;s.governor=false;toast('住民の配分を変更しました。');onAction()}}
+  function applyPreset(preset,silent=false){
+    const s=state;
+    if(preset==='balanced'){
+      s.jobs=balancedJobAllocation(s);
+    }else{
+      // Keep manual food/knowledge presets available, while auto governor balances production.
+      const weights=preset==='food'?{forage:6,wood:2,thinker:1,miner:2,farmer:7,artisan:1,engineer:2}:{forage:2,wood:2,thinker:7,miner:2,farmer:2,artisan:3,engineer:3};
+      const allocated=Object.fromEntries(JOBS.map(j=>[j.id,0]));let remaining=s.population;
+      for(let pass=0;pass<10&&remaining>0;pass++){
+        const options=JOBS.filter(j=>isUnlocked(j)&&allocated[j.id]<jobMax(j.id,s));
+        if(!options.length)break;
+        const total=options.reduce((v,j)=>v+(weights[j.id]||1),0);
+        let granted=0;
+        for(const j of options){const room=jobMax(j.id,s)-allocated[j.id];const take=Math.min(room,Math.max(1,Math.floor(remaining*(weights[j.id]||1)/total)));allocated[j.id]+=take;granted+=take}
+        remaining-=granted;
+      }
+      if(remaining>0)allocated.forage+=remaining;
+      s.jobs=allocated;
+    }
+    if(!silent){s.flags.allocated=true;s.governor=false;toast('住民の配分を変更しました。');onAction()}
+  }
     function recruit(){let cost=25+state.population*5;if(state.population>=cap()){toast('住民を迎えるには住居が必要です。');return}if(state.resources.food<cost)return;state.resources.food-=cost;state.population++;state.peakPopulation=Math.max(state.peakPopulation,state.population);log('新しい住民を迎え入れ、人口が'+state.population+'人になった。');if(state.governor)applyPreset('balanced',true);toast('住民が1人増えました。');onAction()}
   function build(id){const entity=BUILDINGS.find(b=>b.id===id);if(!entity||!isUnlocked(entity))return;const cost=buildingCost(entity);if(!canBuy(cost)){toast('必要な資源が足りません。');return}pay(cost);state.buildings[id]++;state.stats.builds++;log(entity.name+'を建設した（計'+state.buildings[id]+'棟）。');toast(entity.name+'を建設しました！');onAction()}
   function research(id){const tech=TECHS.find(t=>t.id===id);if(!tech||has(id)||!tech.req.every(has)||techRequirementText(tech)||!canBuy(tech.cost))return;pay(tech.cost);state.technologies.push(tech.id);state.stats.technologies++;log('新技術「'+tech.name+'」を発見した。');if(id==='agriculture'||id==='urbanization'||id==='industry'){state.era=id==='agriculture'?'agriculture':id==='urbanization'?'urban':'industrial';if(id==='agriculture')state.focus=null;onAction();openModal('era');return}toast('新しい発見！「'+tech.name+'」');onAction()}
@@ -293,7 +402,7 @@ pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
     const blob=new Blob([JSON.stringify({type:'civilization-emergency-backup',exportedAt:new Date().toISOString(),values:entries},null,2)],{type:'application/json'});
     const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='bunmei-recovery-'+Date.now()+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000);
   }
-  function bindEvents(){document.body.addEventListener('pointerdown',()=>{interactingUntil=Date.now()+2200},{passive:true});document.body.addEventListener('touchstart',()=>{interactingUntil=Date.now()+2200},{passive:true});document.body.addEventListener('click',e=>{const el=e.target.closest('button');if(!el||el.disabled)return;if(el.dataset.tab){navigate(el.dataset.tab);return}if(el.dataset.nav){navigate(el.dataset.nav);return}let action=el.dataset.action;if(!action)return;switch(action){case'explore':explore(el.dataset.target);break;case'click-upgrade':upgradeClick();break;case'auto-explore':state.autoExplore=!state.autoExplore;updateControl(el,state.autoExplore?'ON':'OFF');onAction({render:false});break;case'toggle-auto-building':state.autoBuildings[el.dataset.building]=!state.autoBuildings[el.dataset.building];state.autoBuilder=BUILDINGS.some(b=>state.autoBuildings[b.id]===true);syncAutomationButtons();onAction({render:false});break;case'click-gather':clickGather(el.dataset.resource,el);break;case'auto-builder':state.autoBuilder=!state.autoBuilder;for(const b of BUILDINGS)state.autoBuildings[b.id]=state.autoBuilder;toast(state.autoBuilder?'全施設の自動購入をONにしました。':'全施設の自動購入をOFFにしました。');syncAutomationButtons();onAction({render:false});break;case'job':assignJob(el.dataset.job,Number(el.dataset.delta));break;case'preset':applyPreset(el.dataset.preset);break;case'recruit':recruit();break;case'build':build(el.dataset.building);break;case'research':research(el.dataset.tech);break;case'governor':if(true){state.governor=!state.governor;if(state.governor)applyPreset('balanced',true);toast(state.governor?'自動配置を開始しました。':'自動配置を停止しました。');updateControl(el,state.governor?'自動配置を停止する':'自動配置を有効にする');onAction({render:false})}break;case'prestige-start':if(state.era==='industrial')openModal('prestige');break;case'prestige-allocate':openModal('prestige-allocate');break;
+  function bindEvents(){document.body.addEventListener('pointerdown',()=>{interactingUntil=Date.now()+2200},{passive:true});document.body.addEventListener('touchstart',()=>{interactingUntil=Date.now()+2200},{passive:true});document.body.addEventListener('click',e=>{const el=e.target.closest('button');if(!el||el.disabled)return;if(el.dataset.tab){navigate(el.dataset.tab);return}if(el.dataset.nav){navigate(el.dataset.nav);return}let action=el.dataset.action;if(!action)return;switch(action){case'explore':explore(el.dataset.target);break;case'click-upgrade':upgradeClick();break;case'auto-explore':state.autoExplore=!state.autoExplore;updateControl(el,state.autoExplore?'ON':'OFF');onAction({render:false});break;case'toggle-auto-building':state.autoBuildings[el.dataset.building]=!state.autoBuildings[el.dataset.building];state.autoBuilder=BUILDINGS.some(b=>state.autoBuildings[b.id]===true);syncAutomationButtons();onAction({render:false});break;case'click-gather':clickGather(el.dataset.resource,el);break;case'auto-builder':state.autoBuilder=!state.autoBuilder;for(const b of BUILDINGS)state.autoBuildings[b.id]=state.autoBuilder;toast(state.autoBuilder?'全施設の自動購入をONにしました。':'全施設の自動購入をOFFにしました。');syncAutomationButtons();onAction({render:false});break;case'job':assignJob(el.dataset.job,Number(el.dataset.delta));break;case'preset':applyPreset(el.dataset.preset);break;case'recruit':recruit();break;case'build':build(el.dataset.building);break;case'research':research(el.dataset.tech);break;case'governor':if(true){state.governor=!state.governor;if(state.governor)applyPreset('balanced',true);toast(state.governor?'生産量を均等化する自動配置を開始しました。':'自動配置を停止しました。');updateControl(el,state.governor?'自動配置を停止する':'自動配置を有効にする');onAction({render:false})}break;case'prestige-start':if(state.era==='industrial')openModal('prestige');break;case'prestige-allocate':openModal('prestige-allocate');break;
     case'prestige-confirm':if(state.era==='industrial'){const awarded=prestigeAward();const old=state.prestige;state=createInitialState();state.prestige=normalizePrestige(old);state.prestige.points+=awarded;state.prestige.earned+=awarded;state.prestige.runs++;log('前文明の遺産 '+awarded+' pt を引き継ぎ、新しい文明が誕生した。');activeTab='home';onAction();openModal('prestige-allocate')}break;
     case'prestige-upgrade':if(['industry','growth','click'].includes(el.dataset.perk)){const key=el.dataset.perk,cost=prestigeUpgradeCost(key);if(state.prestige.points>=cost){state.prestige.points-=cost;state.prestige.upgrades[key]++;onAction({render:false});openModal('prestige-allocate')}}break;
     case'prestige-finish':closeModal();navigate('home');save();break;
