@@ -28,7 +28,7 @@
     {id:'forage_hut',name:'採集小屋',icon:'🛖',desc:'採集者の生産効率を高め、食料も少量自動生産する。',base:{wood:28,food:35},factor:1.31,detail:'採集効率 +20%、食料 +0.5/秒'},
     {id:'lumberyard',name:'伐採所',icon:'🌲',desc:'木材の供給を増やす。建築や研究の基盤になる。',base:{wood:44,food:26},factor:1.32,detail:'伐採効率 +22%、木材 +0.4/秒'},
     {id:'archive',name:'学びの広場',icon:'📚',desc:'知識生産を加速し、新技術を次々に解放する。',base:{wood:73,food:50,stone:5},factor:1.35,detail:'探究効率 +20%、知識 +0.35/秒'},
-    {id:'quarry',name:'採石場',icon:'🪨',desc:'採石者4人分の仕事場を提供する。',base:{wood:52,stone:10},factor:1.42,detail:'採石者の上限 +4',unlock:'stone_tools'},
+    {id:'quarry',name:'採石場',icon:'🪨',desc:'採石者8人分の仕事場を提供し、採石効率と自動生産を高める。',base:{wood:52,stone:10},factor:1.42,detail:'採石者上限 +8、採石効率 +25%、石材 +1.5/秒',unlock:'stone_tools'},
     {id:'farm',name:'農地',icon:'🌾',desc:'農耕者5人分の仕事場を提供し、食料を自動生産する。',base:{wood:112,stone:45,food:55},factor:1.45,detail:'農耕者の上限 +5、食料 +1.5/秒',unlock:'seeds'},
     {id:'warehouse',name:'倉庫',icon:'📦',desc:'大量の資材を保管する。',base:{wood:270,stone:160,food:200},factor:1.52,detail:'全資源の生産量 +3%',unlock:'agriculture'},
     {id:'workshop',name:'工房',icon:'🔨',desc:'職人の仕事場を増やす。',base:{wood:500,stone:380,knowledge:160},factor:1.45,detail:'職人上限 +6、木材 +2/秒',unlock:'guilds'},
@@ -86,9 +86,9 @@
   function assigned(s=state){return Object.values(s.jobs).reduce((a,b)=>a+b,0)}
   function cap(s=state){const eraMult=s.era==='industrial'?300:s.era==='urban'?35:s.era==='agriculture'?5:1;return Math.floor(10+(s.buildings.hut*5+s.buildings.granary*3+s.buildings.marketplace*8+s.buildings.cityhall*25)*eraMult)}
   function storageCap(s=state){return 1e100} // v0.5.1: incremental mode has no practical storage cap
-  function jobMax(id,s=state){if(id==='miner')return s.technologies.includes('stone_tools')?s.buildings.quarry*4:0;if(id==='artisan')return s.technologies.includes('guilds')?s.buildings.workshop*6:0;if(id==='engineer')return s.technologies.includes('steam')?s.buildings.factory*4+s.buildings.engineering_school*8:0;if(id==='farmer')return s.technologies.includes('seeds')?s.buildings.farm*5:0;return Infinity}
+  function jobMax(id,s=state){if(id==='miner')return s.technologies.includes('stone_tools')?s.buildings.quarry*8:0;if(id==='artisan')return s.technologies.includes('guilds')?s.buildings.workshop*6:0;if(id==='engineer')return s.technologies.includes('steam')?s.buildings.factory*4+s.buildings.engineering_school*8:0;if(id==='farmer')return s.technologies.includes('seeds')?s.buildings.farm*5:0;return Infinity}
   function isUnlocked(entity){return !entity.unlock||has(entity.unlock)}
-  function getRates(s=state){const j=s.jobs,b=s.buildings,t=id=>s.technologies.includes(id);const policy=s.focus;let food=(j.forage*1.15*(1+b.forage_hut*.20)*(t('fire')?1.25:1)+(b.forage_hut*.50)+j.farmer*3.3*(t('irrigation')?1.3:1)*(t('calendar')?1.35:1)+b.farm*1.5)*(1+b.granary*.12)*(policy==='food'?1.35:1);let wood=(j.wood*.90*(1+b.lumberyard*.22)*(t('stone_tools')?1.20:1)+b.lumberyard*.40)*(policy==='knowledge'?1.1:1);let stone=j.miner*.72;let knowledge=(j.thinker*.62*(1+b.archive*.20)+b.archive*.35)*(t('record')?1.25:1)*(policy==='knowledge'?1.35:1);if(t('market')){food*=1.15;wood*=1.15;stone*=1.15;knowledge*=1.15}wood+=b.workshop*2+b.factory*12+j.artisan*1.2;
+  function getRates(s=state){const j=s.jobs,b=s.buildings,t=id=>s.technologies.includes(id);const policy=s.focus;let food=(j.forage*1.15*(1+b.forage_hut*.20)*(t('fire')?1.25:1)+(b.forage_hut*.50)+j.farmer*3.3*(t('irrigation')?1.3:1)*(t('calendar')?1.35:1)+b.farm*1.5)*(1+b.granary*.12)*(policy==='food'?1.35:1);let wood=(j.wood*.90*(1+b.lumberyard*.22)*(t('stone_tools')?1.20:1)+b.lumberyard*.40)*(policy==='knowledge'?1.1:1);let stone=j.miner*1.65*(1+b.quarry*.25)+b.quarry*1.5;let knowledge=(j.thinker*.62*(1+b.archive*.20)+b.archive*.35)*(t('record')?1.25:1)*(policy==='knowledge'?1.35:1);if(t('market')){food*=1.15;wood*=1.15;stone*=1.15;knowledge*=1.15}wood+=b.workshop*2+b.factory*12+j.artisan*1.2;
     stone+=b.factory*10+j.engineer*5;
     knowledge+=b.cityhall*6+b.powerplant*18+b.engineering_school*35+j.artisan*2.5+j.engineer*4;
     if(t('mechanics')){wood*=1.3;stone*=1.3}
@@ -122,11 +122,11 @@
       const costPerPerson=8+Math.floor(Math.log10(Math.max(10,s.population))*5);
       const affordable=Math.floor(Math.max(0,s.resources.food-30)/costPerPerson);
       const added=Math.min(desired,currentCap-s.population,affordable);
-      if(added>0){s.resources.food-=added*costPerPerson;s.population+=added;s.peakPopulation=Math.max(s.peakPopulation,s.population);if(s.governor)applyPreset('balanced',true)}
+      if(added>0){s.resources.food-=added*costPerPerson;s.population+=added;s.peakPopulation=Math.max(s.peakPopulation,s.population)}
     }
     if(s.governor&&s.governorTimer>=10){s.governorTimer%=10;applyPreset('balanced',true)}if(s.autoBuilder&&s.autoBuilderTimer>=1){s.autoBuilderTimer%=1;const chosen=balancedBuildingChoice(s);
 if(chosen){pay(buildingCost(chosen,s));s.buildings[chosen.id]++;s.stats.builds++;
-  if(s.governor)applyPreset('balanced',true);
+  if(s.governor)smoothGovernorAllocation(s);
 }}if(s.autoExplore&&s.autoExploreTimer>=3&&s.expeditionCharges>0){s.autoExploreTimer%=3;const candidates=[{id:'forest',r:['wood','food']},{id:'river',r:['food','knowledge']},{id:'ruin',r:['knowledge','stone']}];const target=candidates.map(x=>({id:x.id,score:Math.min(...x.r.map(k=>s.resources[k]/(k==='knowledge'?80:150)))})).sort((a,b)=>a.score-b.score)[0];const rewards={forest:{wood:26,food:12},river:{food:35,knowledge:6},ruin:{knowledge:14,stone:5}};s.expeditionCharges--;gain(rewards[target.id]);s.stats.explorations++;}}}
   // Production balancing uses upcoming costs, current stock and the rate of each resource.
   // The food target includes consumption; wood and stone are intentionally protected
@@ -150,7 +150,7 @@ if(chosen){pay(buildingCost(chosen,s));s.buildings[chosen.id]++;s.stats.builds++
       pressure[k]=Math.min(35,(scarcity*.55+flow*.45)*(k==='wood'||k==='stone'?1.55:1));
     }
     if(rates.food<0||s.resources.food<Math.max(100,Math.abs(rates.food)*20))pressure.food=Math.max(pressure.food,12);
-    if(rates.stone<=0&&s.technologies.includes('stone_tools'))pressure.stone=Math.max(pressure.stone,18);
+    if(s.technologies.includes('stone_tools')){if(rates.stone<=0)pressure.stone=Math.max(pressure.stone,18);else if(rates.stone<rates.wood*.5)pressure.stone=Math.max(pressure.stone,Math.min(22,5+rates.wood/Math.max(1,rates.stone)));}
     if(rates.wood<=0)pressure.wood=Math.max(pressure.wood,18);
     return pressure;
   }
@@ -198,7 +198,7 @@ if(chosen){pay(buildingCost(chosen,s));s.buildings[chosen.id]++;s.stats.builds++
       // Quarry is useful because it unlocks miners, not because it directly produces stone.
       if(b.id==='quarry'&&s.technologies.includes('stone_tools')){
         const available=Math.max(0,s.population-assigned(s));
-        const moved=Math.min(4,Math.max(1,Math.ceil(s.population*.08)),available+Math.min(s.jobs.forage,4));
+        const moved=Math.min(8,Math.max(1,Math.ceil(s.population*.08)),available+Math.min(s.jobs.forage,8));
         candidate.jobs.miner+=moved;candidate.jobs.forage=Math.max(0,candidate.jobs.forage-Math.max(0,moved-available));
       }
       if(b.id==='farm'&&s.technologies.includes('seeds')){
@@ -247,6 +247,38 @@ if(chosen){pay(buildingCost(chosen,s));s.buildings[chosen.id]++;s.stats.builds++
   function navigate(tab){if(!TABS.includes(tab))return;activeTab=tab;render();window.scrollTo({top:0,behavior:'instant'})}
   function explore(target){if(state.expeditionCharges<1){toast('探索力が足りません。少し時間をおきましょう。');return}let options={forest:{wood:26,food:12},river:{food:35,knowledge:6},ruin:{knowledge:14,stone:5}};if(!options[target])return;state.expeditionCharges--;gain(options[target]);state.stats.explorations++;const name={forest:'森',river:'川',ruin:'遺跡'}[target];log(name+'を探索し、資源を発見した。');toast(name+'の探索に成功！ '+Object.entries(options[target]).map(([id,val])=>RESOURCE[id].name+' +'+val).join('、'));onAction()}
   function assignJob(id,delta){let job=JOBS.find(j=>j.id===id);if(!job||!isUnlocked(job))return;if(delta>0&&(state.population-assigned()<1||state.jobs[id]>=jobMax(id)))return;if(delta<0&&state.jobs[id]<=0)return;state.jobs[id]+=delta;state.flags.allocated=true;state.governor=false;onAction()}
+  // Move only a bounded fraction of the population at each governor interval.
+  // Keep existing assignments intact where possible, preventing 0 -> huge -> 0 oscillations.
+  function smoothGovernorAllocation(s=state){
+    const target=balancedJobAllocation(s);
+    const current=Object.fromEntries(JOBS.map(j=>[j.id,Math.max(0,Math.floor(s.jobs[j.id]||0))]));
+    const limit=Math.max(1,Math.min(20000,Math.ceil(s.population*.025)));
+    let moved=0;
+    // Newly recruited residents enter the workforce gradually; no forced reshuffle.
+    let idle=Math.max(0,s.population-Object.values(current).reduce((a,b)=>a+b,0));
+    const order=JOBS.map(j=>j.id).sort((a,b)=>(target[b]-current[b])-(target[a]-current[a]));
+    for(const id of order){
+      if(moved>=limit)break;
+      const deficit=Math.max(0,target[id]-current[id]);
+      const room=Math.max(0,jobMax(id,s)-current[id]);
+      const take=Math.min(deficit,room,idle,limit-moved);
+      if(take>0){current[id]+=take;idle-=take;moved+=take;}
+    }
+    // Transfer workers from surplus jobs, at most limit per cycle.
+    for(const dest of order){
+      if(moved>=limit)break;
+      let deficit=Math.min(Math.max(0,target[dest]-current[dest]),Math.max(0,jobMax(dest,s)-current[dest]));
+      if(deficit<=0)continue;
+      for(const source of JOBS.map(j=>j.id)){
+        if(source===dest||moved>=limit||deficit<=0)continue;
+        const surplus=Math.max(0,current[source]-target[source]);
+        const take=Math.min(surplus,deficit,limit-moved);
+        if(take>0){current[source]-=take;current[dest]+=take;deficit-=take;moved+=take;}
+      }
+    }
+    // A few unassigned residents are acceptable until the next adjustment.
+    s.jobs=current;
+  }
   function applyPreset(preset,silent=false){
     const s=state;
     if(preset==='balanced'){
