@@ -8,6 +8,8 @@
   'use strict';
   const VERSION='0.6.0';
   const SAVE_KEY='civilization-seed-save-v1';
+  const SAFE_KEY=SAVE_KEY+'-last-good';
+  const GAME_RECOVERY_VERSION='1.1.3';
   const DB_NAME='civilization-seed-db';
   const MAX_OFFLINE=8*60*60;
   const TABS=['home','people','buildings','research','history'];
@@ -189,18 +191,91 @@ pay(buildingCost(chosen));s.buildings[chosen.id]++;s.stats.builds++;
     root.innerHTML=`<div class="modal-backdrop" role="presentation"><div class="modal" role="dialog" aria-modal="true">${content}</div></div>`;root.querySelector('.modal-backdrop').addEventListener('click',e=>{if(e.target===e.currentTarget&&mode!=='era')closeModal()})}
   function closeModal(){modalMode='';$('#modal-root').innerHTML=''}
   function exportSave(){const blob=new Blob([JSON.stringify({...state,savedAt:Date.now()},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='bunmei-no-tane-save-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),8000);toast('バックアップを書き出しました。')}
-  async function importSave(file){if(!file)return;try{if(file.size>2*1024*1024)throw Error('ファイルが大きすぎます。');let raw=JSON.parse(await file.text());let s=sanitize(raw);closeModal();state=s;let gap=Math.max(0,(Date.now()-state.savedAt)/1000);if(gap>3)advance(Math.min(MAX_OFFLINE,gap));state.savedAt=Date.now();evaluateMilestones();activeTab='home';render();await save();toast('セーブデータを読み込みました。')}catch(err){toast('読み込みに失敗しました：'+err.message)}}
+  async function importSave(file){if(!file)return;try{if(file.size>2*1024*1024)throw Error('ファイルが大きすぎます。');let raw=JSON.parse(await file.text());let s=sanitize(raw);closeModal();state=s;let gap=Math.max(0,(Date.now()-state.savedAt)/1000);if(gap>3)advance(Math.min(MAX_OFFLINE,gap));state.savedAt=Date.now();evaluateMilestones();activeTab='home';loaded=true;saveAllowed=true;render();const stored=await save();toast(stored?'セーブデータを読み込みました。':'読み込みましたが端末への保存に失敗しました。バックアップを保管してください。')}catch(err){toast('読み込みに失敗しました：'+err.message)}}
   let offlineReal=0,offlineDiff=[];
-  async function initStorage(){try{idb=await new Promise((resolve,reject)=>{let request=indexedDB.open(DB_NAME,1);request.onupgradeneeded=()=>request.result.createObjectStore('saves');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)});}catch(_){idb=null}}
-  async function readSave(){let fromDb=null,fromLocal=null;if(idb){try{fromDb=await new Promise((resolve,reject)=>{const tx=idb.transaction('saves','readonly'),req=tx.objectStore('saves').get(SAVE_KEY);req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error)})}catch(_){}}try{fromLocal=JSON.parse(localStorage.getItem(SAVE_KEY)||'null')}catch(_){}return (fromLocal?.savedAt||0)>(fromDb?.savedAt||0)?fromLocal:(fromDb||fromLocal)}
-  async function save(){state.savedAt=Date.now();const payload=JSON.stringify(state);try{localStorage.setItem(SAVE_KEY,payload)}catch(_){}if(!idb)return;try{await new Promise((resolve,reject)=>{const tx=idb.transaction('saves','readwrite');tx.objectStore('saves').put(state,SAVE_KEY);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}catch(_){} }
+  // Safety layer for installed iOS PWA navigation. Never turn a storage error
+  // or malformed save into a fresh game and then autosave over user progress.
+  let storageReady=false, saveAllowed=false, storageIssue='', saveInProgress=false;
+  let storageOpenStatus='unavailable';
+  function isSaveShape(v){return !!(v&&v.schema===1&&typeof v.population==='number'&&Number.isFinite(v.population)&&v.resources&&typeof v.resources==='object'&&v.jobs&&typeof v.jobs==='object');}
+  function parseSave(raw){if(!raw)return null;try{const value=typeof raw==='string'?JSON.parse(raw):raw;return isSaveShape(value)?value:null;}catch(_){return null;}}
+  function storageNotice(title,body,allowRetry=true){
+    loaded=false;saveAllowed=false;
+    const node=$('#main');if(node)node.innerHTML=`<section class="panel" style="margin:20px 0;padding:20px"><h2>${esc(title)}</h2><p>${esc(body)}</p><p class="muted">既存セーブへの上書きを停止しています。独立公開版やバックアップのJSONは削除しないでください。</p><div class="modal-actions">${allowRetry?'<button class="button" type="button" data-action="safe-retry">再読み込みして確認</button>':''}<button class="button secondary" type="button" data-action="safe-import">JSONバックアップを読み込む</button><button class="button secondary" type="button" data-action="safe-export-local">残っている保存データを退避</button><a class="button secondary" href="../../recovery.html" style="text-decoration:none">データ救出画面へ</a></div><input id="safe-import-file" type="file" accept=".json,application/json" class="hidden"></section>`;
+  }
+  async function initStorage(){
+    // Give WebKit's IndexedDB a bounded time to start. A hung open used to leave
+    // the game's main panel empty forever on some PWA reentries.
+    try{
+      const opening=new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,1);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('saves'))req.result.createObjectStore('saves')};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||Error('IndexedDB failed'));req.onblocked=()=>reject(Error('IndexedDB is blocked'))});
+      idb=await Promise.race([opening,new Promise((_,reject)=>setTimeout(()=>reject(Error('IndexedDB timeout')),4800))]);storageOpenStatus='ready';
+    }catch(e){idb=null;storageOpenStatus=String(e?.message||e);}
+  }
+  async function inspectSave(){
+    let local=null,backup=null,database=null,storageReadable=false,dbReadable=false,rawWasPresent=false;
+    try{
+      const raw=localStorage.getItem(SAVE_KEY),backupRaw=localStorage.getItem(SAFE_KEY);
+      storageReadable=true;rawWasPresent=raw!==null||backupRaw!==null;
+      local=parseSave(raw);backup=parseSave(backupRaw);
+    }catch(e){storageIssue='ローカル保存領域を読み取れませんでした: '+String(e?.message||e);}
+    if(idb){try{database=await new Promise((resolve,reject)=>{const tx=idb.transaction('saves','readonly');const req=tx.objectStore('saves').get(SAVE_KEY);req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error||Error('read failure'))});dbReadable=true;}catch(e){storageIssue='IndexedDBのセーブを読めませんでした: '+String(e?.message||e);}}
+    const candidates=[local,backup,database].filter(v=>{if(!isSaveShape(v))return false;try{sanitize(v);return true;}catch(_){return false;}});
+    candidates.sort((a,b)=>(Number(b.savedAt)||0)-(Number(a.savedAt)||0));
+    const winner=candidates[0]||null;
+    // Detect a newly reset/empty copy shadowing a substantially progressed save.
+    // Do not guess which copy is correct: leave both sources untouched for recovery.
+    const progressScore=v=>Math.max(0,Number(v.elapsed)||0)/3600+Math.max(0,Number(v.peakPopulation||v.population)||0)/8+Math.max(0,Number(v.stats?.builds)||0)*5+Math.max(0,Number(v.stats?.technologies)||0)*40+Math.max(0,Number(v.prestige?.runs)||0)*150+Math.max(0,(v.technologies||[]).length)*35;
+    if(winner && candidates.some(other=>other!==winner && progressScore(other)>progressScore(winner)*2+25 && (Number(other.savedAt)||0)<(Number(winner.savedAt)||0)))return {error:'新しいセーブより進行度が高い古いセーブが見つかりました。自動上書きを停止しました。救出画面で双方をバックアップし、どちらを採用するか確認してください。',winner:null};
+    // Malformed primary data must remain available to forensic recovery.
+    if(!winner && (rawWasPresent||database!==null))return {error:'保存データを確認できません。破損または一時的なアクセス不良の可能性があります。',winner:null};
+    if(!winner && !storageReadable && !dbReadable)return {error:'端末の保存領域にアクセスできません。',winner:null};
+    if(!winner && storageOpenStatus!=='ready')return {error:'IndexedDBの開始を確認できません。初期セーブで上書きしないため停止しました。',winner:null};
+    return {winner,error:''};
+  }
+  async function save(){
+    if(!saveAllowed||!loaded)return false;
+    // A synchronous localStorage copy completes before navigation/pagehide.
+    state.savedAt=Date.now();let payload;
+    try{payload=JSON.stringify(state);if(!parseSave(payload))throw Error('セーブ内容が不正です');}catch(e){storageIssue='セーブを生成できません: '+e.message;return false;}
+    let localOK=false;
+    try{
+      const previous=localStorage.getItem(SAVE_KEY);
+      if(previous&&parseSave(previous))localStorage.setItem(SAFE_KEY,previous);
+      localStorage.setItem(SAVE_KEY,payload);localOK=true;
+    }catch(e){storageIssue='ローカル保存に失敗しました: '+String(e?.message||e);}
+    if(idb){try{await new Promise((resolve,reject)=>{const tx=idb.transaction('saves','readwrite');tx.objectStore('saves').put(JSON.parse(payload),SAVE_KEY);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||Error('save failed'));tx.onabort=()=>reject(tx.error||Error('save aborted'))});return true;}catch(e){storageIssue='IndexedDB保存に失敗しました: '+String(e?.message||e);}}
+    if(!localOK){toast('保存できません。バックアップを書き出してください。');}
+    return localOK;
+  }
+  function exportLocalRecovery(){
+    const entries={};for(const key of [SAVE_KEY,SAFE_KEY]){try{entries[key]=localStorage.getItem(key);}catch(e){entries[key]='読み取り不可: '+e.message}}
+    const blob=new Blob([JSON.stringify({type:'civilization-emergency-backup',exportedAt:new Date().toISOString(),values:entries},null,2)],{type:'application/json'});
+    const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='bunmei-recovery-'+Date.now()+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000);
+  }
   function bindEvents(){document.body.addEventListener('pointerdown',()=>{interactingUntil=Date.now()+2200},{passive:true});document.body.addEventListener('touchstart',()=>{interactingUntil=Date.now()+2200},{passive:true});document.body.addEventListener('click',e=>{const el=e.target.closest('button');if(!el||el.disabled)return;if(el.dataset.tab){navigate(el.dataset.tab);return}if(el.dataset.nav){navigate(el.dataset.nav);return}let action=el.dataset.action;if(!action)return;switch(action){case'explore':explore(el.dataset.target);break;case'click-upgrade':upgradeClick();break;case'auto-explore':state.autoExplore=!state.autoExplore;updateControl(el,state.autoExplore?'ON':'OFF');onAction({render:false});break;case'toggle-auto-building':state.autoBuildings[el.dataset.building]=!state.autoBuildings[el.dataset.building];state.autoBuilder=BUILDINGS.some(b=>state.autoBuildings[b.id]===true);syncAutomationButtons();onAction({render:false});break;case'click-gather':clickGather(el.dataset.resource,el);break;case'auto-builder':state.autoBuilder=!state.autoBuilder;for(const b of BUILDINGS)state.autoBuildings[b.id]=state.autoBuilder;toast(state.autoBuilder?'全施設の自動購入をONにしました。':'全施設の自動購入をOFFにしました。');syncAutomationButtons();onAction({render:false});break;case'job':assignJob(el.dataset.job,Number(el.dataset.delta));break;case'preset':applyPreset(el.dataset.preset);break;case'recruit':recruit();break;case'build':build(el.dataset.building);break;case'research':research(el.dataset.tech);break;case'governor':if(true){state.governor=!state.governor;if(state.governor)applyPreset('balanced',true);toast(state.governor?'自動配置を開始しました。':'自動配置を停止しました。');updateControl(el,state.governor?'自動配置を停止する':'自動配置を有効にする');onAction({render:false})}break;case'prestige-start':if(state.era==='industrial')openModal('prestige');break;case'prestige-allocate':openModal('prestige-allocate');break;
     case'prestige-confirm':if(state.era==='industrial'){const awarded=prestigeAward();const old=state.prestige;state=createInitialState();state.prestige=normalizePrestige(old);state.prestige.points+=awarded;state.prestige.earned+=awarded;state.prestige.runs++;log('前文明の遺産 '+awarded+' pt を引き継ぎ、新しい文明が誕生した。');activeTab='home';onAction();openModal('prestige-allocate')}break;
     case'prestige-upgrade':if(['industry','growth','click'].includes(el.dataset.perk)){const key=el.dataset.perk,cost=prestigeUpgradeCost(key);if(state.prestige.points>=cost){state.prestige.points-=cost;state.prestige.upgrades[key]++;onAction({render:false});openModal('prestige-allocate')}}break;
     case'prestige-finish':closeModal();navigate('home');save();break;
-    case'settings':openModal('settings');break;case'refresh-game':save();window.location.replace(window.location.pathname+'?update='+Date.now());break;case'close-modal':closeModal();break;case'export':exportSave();break;case'import':$('#import-file').click();break;case'reset-prompt':openModal('reset');break;case'reset-confirm':state=createInitialState();closeModal();activeTab='home';onAction();toast('新しい文明が始まりました。');break;case'focus':state.focus=el.dataset.focus;log('文明の方針として「'+(state.focus==='food'?'豊穣':'探究')+'」を選んだ。');closeModal();onAction();break;}});document.body.addEventListener('change',e=>{if(e.target.id==='import-file')importSave(e.target.files[0]);});document.addEventListener('visibilitychange',()=>{if(document.hidden)save();else{let now=Date.now();let gap=Math.max(0,(now-lastFrame)/1000);if(gap>3){const before={...state.resources};advance(Math.min(MAX_OFFLINE,gap));state.savedAt=now;evaluateMilestones();render();if(gap>20){offlineReal=gap;offlineDiff=Object.keys(RESOURCE).map(k=>[k,state.resources[k]-before[k]]);openModal('offline')}}lastFrame=now;tickAccumulator=0}});window.addEventListener('pagehide',()=>{save()})}
+    case'safe-retry':location.reload();break;case'safe-import':$('#safe-import-file')?.click();break;case'safe-export-local':exportLocalRecovery();break;case'settings':openModal('settings');break;case'refresh-game':save();window.location.replace(window.location.pathname+'?update='+Date.now());break;case'close-modal':closeModal();break;case'export':exportSave();break;case'import':$('#import-file').click();break;case'reset-prompt':openModal('reset');break;case'reset-confirm':state=createInitialState();closeModal();activeTab='home';onAction();toast('新しい文明が始まりました。');break;case'focus':state.focus=el.dataset.focus;log('文明の方針として「'+(state.focus==='food'?'豊穣':'探究')+'」を選んだ。');closeModal();onAction();break;}});document.body.addEventListener('change',e=>{if(e.target.id==='import-file'||e.target.id==='safe-import-file')importSave(e.target.files[0]);});document.addEventListener('visibilitychange',()=>{if(document.hidden)save();else{let now=Date.now();let gap=Math.max(0,(now-lastFrame)/1000);if(gap>3){const before={...state.resources};advance(Math.min(MAX_OFFLINE,gap));state.savedAt=now;evaluateMilestones();render();if(gap>20){offlineReal=gap;offlineDiff=Object.keys(RESOURCE).map(k=>[k,state.resources[k]-before[k]]);openModal('offline')}}lastFrame=now;tickAccumulator=0}});window.addEventListener('pagehide',()=>{save()});document.getElementById('toolbox-home')?.addEventListener('click',()=>{save()})}
   let tickAccumulator=0;function loop(now){let wall=Date.now();let delta=Math.max(0,(wall-lastFrame)/1000);lastFrame=wall;if(loaded){if(!document.hidden){tickAccumulator+=Math.min(delta,5);while(tickAccumulator>=1){advance(1);tickAccumulator-=1;}}if(wall-renderAt>=1000){$('#resources').innerHTML=resourceHTML();renderAt=wall}if(wall-mainRenderAt>=5000&&wall>interactingUntil){render();mainRenderAt=wall}if(wall-lastFloatAt>=2600&&activeTab==='buildings'&&!document.hidden){lastFloatAt=wall;const rates=getRates();for(const card of document.querySelectorAll('.shop-card[data-building-card]')){const id=card.dataset.buildingCard;const b=BUILDINGS.find(x=>x.id===id);if(!b||!state.buildings[id])continue;const resource=({forage_hut:'food',lumberyard:'wood',archive:'knowledge',farm:'food'})[id];if(resource&&rates[resource]>0)floatAt(card,'+'+n(rates[resource]*2.6)+' '+RESOURCE[resource].name)}}if(wall-autoSaveAt>10000){save();autoSaveAt=wall}}requestAnimationFrame(loop)}
-  async function boot(){bindEvents();await initStorage();const data=await readSave();if(data){try{const broken=Object.values(data.resources||{}).some(v=>v===null||!Number.isFinite(Number(v)))||Object.values(data.jobs||{}).some(v=>v===null||!Number.isFinite(Number(v)));if(broken){try{localStorage.setItem(SAVE_KEY+'-damaged-backup',JSON.stringify(data))}catch(_){}}state=sanitize(data);offlineReal=Math.max(0,(Date.now()-state.savedAt)/1000);if(offlineReal>8){const before={...state.resources};advance(Math.min(MAX_OFFLINE,offlineReal));offlineDiff=Object.keys(RESOURCE).map(k=>[k,state.resources[k]-before[k]])}}catch(e){console.warn('Save error',e);state=createInitialState()}}evaluateMilestones();loaded=true;lastFrame=Date.now();autoSaveAt=lastFrame;render();if(offlineReal>20)openModal('offline');requestAnimationFrame(loop)}
+  async function boot(){
+    bindEvents();
+    if($('#main'))$('#main').innerHTML='<section class="panel"><p>保存データを確認中です…</p></section>';
+    await initStorage();
+    const inspected=await inspectSave();
+    if(inspected.error){storageNotice('セーブの安全確認が必要です',inspected.error);return;}
+    if(inspected.winner){
+      try{
+        state=sanitize(inspected.winner);
+        offlineReal=Math.max(0,(Date.now()-state.savedAt)/1000);
+        if(offlineReal>8){const before={...state.resources};advance(Math.min(MAX_OFFLINE,offlineReal));offlineDiff=Object.keys(RESOURCE).map(k=>[k,state.resources[k]-before[k]]);}
+      }catch(e){storageNotice('セーブを開けません',String(e.message||e));return;}
+    }else{
+      // Only start an entirely new game after both stores were confirmed empty.
+      state=createInitialState();
+    }
+    evaluateMilestones();loaded=true;saveAllowed=true;lastFrame=Date.now();autoSaveAt=lastFrame;render();if(offlineReal>20)openModal('offline');requestAnimationFrame(loop);
+  }
   window.__civilizationGame={getState:()=>structuredClone(state),getRates:()=>getRates(),loadForTest:raw=>{state=sanitize(raw);evaluateMilestones();render()},advanceForTest:seconds=>{advance(seconds);evaluateMilestones();render()},version:VERSION};
   boot();
 })();

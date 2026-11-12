@@ -11,6 +11,12 @@
   <link rel="icon" type="image/png" href="icon-192.png">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="style.css?v=0.6.0">
+  <style>
+    /* Toolbox integration only: no iframe; leave the game's touch area intact. */
+    .toolbox-home {position:fixed;z-index:400;right:10px;bottom:calc(91px + env(safe-area-inset-bottom));background:#163039f2;color:#fff;border:1px solid #8bb6b0b0;border-radius:13px;text-decoration:none;padding:10px 13px;font:700 12px/1.4 -apple-system,system-ui,sans-serif;box-shadow:0 3px 14px #0006;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+    .toolbox-home:focus-visible {outline:2px solid #eed9a5;outline-offset:2px}
+    @media(max-height:480px){.toolbox-home{bottom:calc(67px + env(safe-area-inset-bottom))}}
+  </style>
 </head>
 <body>
   <div class="app" id="app">
@@ -33,6 +39,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <div id="modal-root"></div>
   </div>
+  <a href="../../" class="toolbox-home" id="toolbox-home" aria-label="My Toolboxのホームに戻る">← ホームへ戻る</a>
   <script src="game.js?v=0.6.0" defer></script>
 </body>
 </html>
