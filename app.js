@@ -1,5 +1,5 @@
 /**
- * My Toolbox v1.1.3
+ * My Toolbox v1.1.4
  * Created: 2026-11-09
  * Author: Personal project / ChatGPT (prototype)
  * Zero-dependency PWA. Text data stays in localStorage; photos use IndexedDB. Backups include both.
@@ -301,7 +301,7 @@
   let toastTimer;
   function showToast(message){const node=$('#toast');node.textContent=message;node.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('visible'),2300);}
   const iconTile=(icon,color='purple',data='')=>tile(icon,color,data);
-  const pageHeading=(title,desc)=>`<div class="topbar"><div><p class="kicker"><span class="brand-icon-mini" aria-hidden="true">${imageDataOk(state.prefs.appIconImage)?`<img src="${state.prefs.appIconImage}" alt="">`:svgIcon(state.prefs.appIconKey||'grid')}</span>${esc(state.prefs.appName||'My Toolbox')} · 1.1.3</p><h1>${esc(title)}</h1></div><div class="header-actions"><button type="button" class="circle-button menu-trigger" data-action="toggle-drawer" aria-label="クイックメニューを開く" aria-haspopup="dialog" aria-expanded="${ui.drawerOpen}">☰</button></div></div>${desc?`<p class="page-intro">${esc(desc)}</p>`:''}`;
+  const pageHeading=(title,desc)=>`<div class="topbar"><div><p class="kicker"><span class="brand-icon-mini" aria-hidden="true">${imageDataOk(state.prefs.appIconImage)?`<img src="${state.prefs.appIconImage}" alt="">`:svgIcon(state.prefs.appIconKey||'grid')}</span>${esc(state.prefs.appName||'My Toolbox')} · 1.1.4</p><h1>${esc(title)}</h1></div><div class="header-actions"><button type="button" class="circle-button menu-trigger" data-action="toggle-drawer" aria-label="クイックメニューを開く" aria-haspopup="dialog" aria-expanded="${ui.drawerOpen}">☰</button></div></div>${desc?`<p class="page-intro">${esc(desc)}</p>`:''}`;
   const empty=(icon,message)=>`<div class="empty"><div class="empty-icon">${icon}</div>${message}</div>`;
   const listStats = id => {const list=getList(id);return list?counts(list.items):{done:0,total:0};};
   const countPending = id => {const s=listStats(id);return s.total-s.done;};
@@ -555,7 +555,7 @@
         .replace(/(rel="icon"[^>]*href="[^"?]+)(?:\?[^"]*)?("[^>]*>)/,(_,a,b)=>a+'?brand='+stamp+b);
       manifest.icons=manifest.icons.map(icon=>({...icon,src:icon.src.replace(/\?.*$/,'')+'?brand='+stamp}));
       // A different cache name forces the existing service worker to refresh static icon assets.
-      texts[3]=texts[3].replace(/(const CACHE_VERSION = ')[^']+(';)/,(_,a,b)=>a+`v1.1.3-github-pages-brand-${stamp}`+b);
+      texts[3]=texts[3].replace(/(const CACHE_VERSION = ')[^']+(';)/,(_,a,b)=>a+`v1.1.4-github-pages-brand-${stamp}`+b);
       const encode=new TextEncoder(),entries=files.map((name,i)=>[name,encode.encode(texts[i])]);
       entries.push(['manifest.webmanifest',encode.encode(JSON.stringify(manifest,null,2))]);
       entries.push(['.nojekyll',new Uint8Array(0)]);
@@ -759,7 +759,7 @@
       <div class="setting-row"><div><b>データ救出（読み取り専用）</b><small>消えたように見える保存データを確認・書き出し</small></div><a href="./recovery.html" class="secondary-btn" style="text-decoration:none">開く</a></div>
       <div class="setting-row"><div><b>デモデータに初期化</b><small>写真も含めて全削除します</small></div><button class="danger-btn" data-action="reset">初期化</button></div>
     </div></section>
-    <section class="settings-group"><p class="settings-title">このアプリについて</p><div class="card"><div class="setting-row"><div><b>My Toolbox v1.1.3</b><small>HTML / CSS / JavaScript / Service Worker<br>無料で動作する個人用PWAの試作品</small></div></div><div class="setting-row"><div><b>カレンダーとGoogle連携</b><small>予定は端末に保存。Googleへの転記は登録画面から手動で確定します。Google側の予定取得・双方向同期はありません。</small></div></div><div class="setting-row"><div><b>データの保存先</b><small>予定やメモはlocalStorage、写真はIndexedDBに保存。クラウド同期はありません。</small></div></div><div class="setting-row"><div><b>アプリ・ゲームへのリンク</b><small>Universal Linkや公式のアプリURLが必要です。OSやアプリ側の制限で開けない場合があります。</small></div></div><div class="setting-row"><div><b>機能の追加</b><small>「マイリスト」ではリストを自由に増やせます。新しい種類のツールはコード追加で拡張できます。</small></div></div></div></section>
+    <section class="settings-group"><p class="settings-title">このアプリについて</p><div class="card"><div class="setting-row"><div><b>My Toolbox v1.1.4</b><small>HTML / CSS / JavaScript / Service Worker<br>無料で動作する個人用PWAの試作品</small></div></div><div class="setting-row"><div><b>カレンダーとGoogle連携</b><small>予定は端末に保存。Googleへの転記は登録画面から手動で確定します。Google側の予定取得・双方向同期はありません。</small></div></div><div class="setting-row"><div><b>データの保存先</b><small>予定やメモはlocalStorage、写真はIndexedDBに保存。クラウド同期はありません。</small></div></div><div class="setting-row"><div><b>アプリ・ゲームへのリンク</b><small>Universal Linkや公式のアプリURLが必要です。OSやアプリ側の制限で開けない場合があります。</small></div></div><div class="setting-row"><div><b>機能の追加</b><small>「マイリスト」ではリストを自由に増やせます。新しい種類のツールはコード追加で拡張できます。</small></div></div></div></section>
     <div class="feature-tip"><span>${svgIcon('bookmark')}</span><p>ログインやサーバーへのデータ送信機能はありません。Web公開した場合も、メモの内容が自動で公開されるわけではありません。ただしブラウザデータの消去に備え、バックアップを取ってください。</p></div>
     <input type="file" id="import-file" accept=".json,application/json" hidden>`;
   }
