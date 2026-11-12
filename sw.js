@@ -1,16 +1,21 @@
-/* My Toolbox v1.1.1 — GitHub Pages compatible offline shell.
+/* My Toolbox v1.1.2 — GitHub Pages compatible offline shell.
  * Limit cache and cleanup to THIS site's path. github.io hosts many repositories
  * under one origin, so deleting all origin caches would harm unrelated apps.
  */
-const CACHE_VERSION = 'v1.1.1-github-pages-1';
+const CACHE_VERSION = 'v1.1.2-github-pages-civilization-1';
 const SCOPE_URL = new URL(self.registration.scope);
 const CACHE_PREFIX = `my-toolbox:${encodeURIComponent(SCOPE_URL.pathname)}:`;
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './manifest.webmanifest',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/icon-1024.png'
+  './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/icon-1024.png',
+  './game-player.html',
+  './games/civilization/index.html', './games/civilization/style.css', './games/civilization/game.js',
+  './games/civilization/manifest.webmanifest',
+  './games/civilization/icon-180.png', './games/civilization/icon-192.png', './games/civilization/icon-512.png'
 ];
 const SHELL_URLS = new Set(ASSETS.map(path => new URL(path, SCOPE_URL).href));
+const GAME_DIR = new URL('./games/civilization/', SCOPE_URL).pathname;
 const HOME_URL = new URL('./', SCOPE_URL).href;
 const INDEX_URL = new URL('./index.html', SCOPE_URL).href;
 
@@ -36,10 +41,11 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   // Project pages share USER.github.io with other repositories. Never intercept
-  // external requests, sibling projects, or future independent /games/ pages.
+  // external requests or sibling GitHub Pages projects.
   if (url.origin !== SCOPE_URL.origin || !url.pathname.startsWith(SCOPE_URL.pathname)) return;
   const cleanURL = new URL(url.pathname, url.origin).href;
-  if (!SHELL_URLS.has(cleanURL)) return;
+  // Future game assets added under this folder are cached on their first online request.
+  if (!SHELL_URLS.has(cleanURL) && !url.pathname.startsWith(GAME_DIR)) return;
 
   event.respondWith((async () => {
     try {

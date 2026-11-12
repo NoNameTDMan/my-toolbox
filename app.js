@@ -1,5 +1,5 @@
 /**
- * My Toolbox v1.1.1
+ * My Toolbox v1.1.2
  * Created: 2026-11-09
  * Author: Personal project / ChatGPT (prototype)
  * Zero-dependency PWA. Text data stays in localStorage; photos use IndexedDB. Backups include both.
@@ -11,6 +11,15 @@
   'use strict';
 
   const STORE_KEY = 'my-toolbox-data-v1';
+  // An installed module is a normal, editable game entry (not an extra tool tile).
+  // The flag prevents re-adding it if the user removes its entry.
+  const CIVILIZATION_ID = 'builtin-civilization-v1';
+  const CIVILIZATION_URL = './game-player.html?game=civilization';
+  const civilizationEntry = () => ({
+    id:CIVILIZATION_ID,name:'文明の種',url:CIVILIZATION_URL,
+    icon:'🎮',iconKey:'game',iconImage:'',kind:'game',
+    category:'内蔵ゲーム',folder:'',favorite:false,browser:'system'
+  });
   const TODAY = new Date().toISOString();
   // Calendar dates are LOCAL dates. Avoid toISOString().slice(0, 10) in Japan.
   const dateKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -133,6 +142,7 @@
     return {
       version:7,
       links:[
+        civilizationEntry(),
         {id:uid(),name:'Google',url:'https://www.google.com/',icon:'🌐',iconKey:'globe',kind:'web',category:'検索',favorite:true},
         {id:uid(),name:'YouTube',url:'https://www.youtube.com/',icon:'▶️',iconKey:'play',kind:'web',category:'動画',favorite:true},
         {id:uid(),name:'ChatGPT',url:'https://chatgpt.com/',icon:'✳️',iconKey:'grid',kind:'web',category:'ツール',favorite:true},
@@ -152,7 +162,7 @@
       cube:{stickers:solvedCube(),history:[],moveCount:0},
       habits:{items:[{id:uid(),title:'',done:false},{id:uid(),title:'',done:false},{id:uid(),title:'',done:false}],day:'',history:{}},
       notes:[{id:uid(),title:'ここから始めよう',body:'このメモはサンプルです。\n\n「＋」ボタンから、思いついたアイデアを書き留めてみましょう。リンクやリストも自由に追加できます。',updatedAt:TODAY}],
-      prefs:{appName:'My Toolbox',appIconKey:'grid',appIconImage:'',theme:'light',onboard:true,defaultBrowser:'safari',searchBrowser:'safari',searchEngine:'google',homeSections:[],hiddenSections:[],photoAlbums:[]}
+      prefs:{appName:'My Toolbox',appIconKey:'grid',appIconImage:'',theme:'light',onboard:true,defaultBrowser:'safari',searchBrowser:'safari',searchEngine:'google',homeSections:[],hiddenSections:[],photoAlbums:[],civilizationAdded:true}
     };
   }
   const BROWSERS=[['system','端末の既定'],['safari','Safari（試験的）'],['chrome','Chrome'],['firefox','Firefox'],['edge','Edge']];
@@ -162,6 +172,10 @@
   function normalize(raw){
     if(!raw || typeof raw !== 'object' || !Array.isArray(raw.links) || !Array.isArray(raw.lists) || !Array.isArray(raw.notes)) throw Error('バックアップの形式が正しくありません。');
     const links=raw.links.slice(0,2000).map(x=>({id:String(x.id||uid()),name:String(x.name||'無題').slice(0,150),url:String(x.url||'').slice(0,3000),icon:String(x.icon||'🔗').slice(0,8),iconKey:legacyIcon(x.iconKey||x.icon,(x.kind==='app'?'game':'link')),iconImage:imageDataOk(x.iconImage)?x.iconImage:'',kind:['app','game'].includes(x.kind)?x.kind:'web',category:String(x.category||'').slice(0,100),folder:String(x.folder||'').slice(0,100),favorite:!!x.favorite,browser:['inherit','system','safari','chrome','firefox','edge'].includes(x.browser)?x.browser:'inherit'}));
+    // Migrate old toolbox data without touching existing links or their ordering.
+    // A previously deleted bundled entry must remain deleted after subsequent loads.
+    const civilizationAdded=!!raw.prefs?.civilizationAdded || links.some(x=>x.id===CIVILIZATION_ID);
+    if(!civilizationAdded)links.push(civilizationEntry());
     const lists=raw.lists.slice(0,300).map(x=>({id:String(x.id||uid()),name:String(x.name||'リスト').slice(0,120),icon:String(x.icon||'📋').slice(0,8),iconKey:legacyIcon(x.iconKey||x.icon,'list'),builtin:x.id==='tasks',items:Array.isArray(x.items)?x.items.slice(0,10000).map(item=>({id:String(item.id||uid()),title:String(item.title||'').slice(0,500),done:!!item.done,category:item.category==='shopping'?'shopping':'todo',due:isDateKey(item.due)?item.due:'',repeatAnchor:isDateKey(item.repeatAnchor)?item.repeatAnchor:(isDateKey(item.due)?item.due:''),repeat:['none','daily','weekly','monthly','3days'].includes(item.repeat)?item.repeat:'none',completedDates:Array.isArray(item.completedDates)?item.completedDates.filter(isDateKey).slice(-500):[]})):[]}));
     // Migrate v0.1–v0.4's two built-in lists into one, without dropping entries.
     // Distinct category tags retain each item's original TODO/shopping meaning.
@@ -205,7 +219,7 @@
     const history=Object.fromEntries(Object.entries(habitRaw.history&&typeof habitRaw.history==='object'?habitRaw.history:{}).filter(([day])=>isDateKey(day)).slice(-500).map(([day,entry])=>[day,{items:Array.isArray(entry?.items)?entry.items.slice(0,3).map(x=>({title:String(x.title||'').slice(0,100),done:!!x.done})):[]} ]));
     const habits={items:Array.from({length:3},(_,i)=>({id:String(habitRaw.items?.[i]?.id||uid()),title:String(habitRaw.items?.[i]?.title||'').slice(0,100),done:!!habitRaw.items?.[i]?.done})),day:isDateKey(habitRaw.day)?habitRaw.day:'',history};
     if(habits.day&&!history[habits.day])history[habits.day]={items:habits.items.map(x=>({title:x.title,done:x.done}))};
-    return {version:7,links,lists:retainedLists,notes,events,habits,timetable,cube,prefs:{appName:String(raw.prefs?.appName||'My Toolbox').slice(0,32),appIconKey:legacyIcon(raw.prefs?.appIconKey||'grid','grid'),appIconImage:imageDataOk(raw.prefs?.appIconImage)?raw.prefs.appIconImage:'',theme:['light','dark','system'].includes(raw.prefs?.theme)?raw.prefs.theme:'light',onboard:!!raw.prefs?.onboard,toolOrder:Array.isArray(raw.prefs?.toolOrder)?raw.prefs.toolOrder.filter(x=>typeof x==='string'):[],linkOrder:Array.isArray(raw.prefs?.linkOrder)?raw.prefs.linkOrder.filter(x=>typeof x==='string'):[],bottomNav:Array.isArray(raw.prefs?.bottomNav)?raw.prefs.bottomNav.filter(x=>typeof x==='string'):[],folders:{web:Array.isArray(raw.prefs?.folders?.web)?raw.prefs.folders.web.filter(x=>typeof x==='string'):[],app:Array.isArray(raw.prefs?.folders?.app)?raw.prefs.folders.app.filter(x=>typeof x==='string'):[],game:Array.isArray(raw.prefs?.folders?.game)?raw.prefs.folders.game.filter(x=>typeof x==='string'):[]},photoAlbums:Array.isArray(raw.prefs?.photoAlbums)?raw.prefs.photoAlbums.filter(x=>typeof x==='string').slice(0,200):[],defaultBrowser:validBrowser(raw.prefs?.defaultBrowser,'safari'),searchBrowser:validBrowser(raw.prefs?.searchBrowser,'safari'),searchEngine:['google','duckduckgo','bing'].includes(raw.prefs?.searchEngine)?raw.prefs.searchEngine:'google',homeSections:Array.isArray(raw.prefs?.homeSections)?raw.prefs.homeSections.filter(x=>typeof x==='string'):[],hiddenSections:Array.isArray(raw.prefs?.hiddenSections)?raw.prefs.hiddenSections.filter(x=>typeof x==='string'):[]}};
+    return {version:7,links,lists:retainedLists,notes,events,habits,timetable,cube,prefs:{appName:String(raw.prefs?.appName||'My Toolbox').slice(0,32),appIconKey:legacyIcon(raw.prefs?.appIconKey||'grid','grid'),appIconImage:imageDataOk(raw.prefs?.appIconImage)?raw.prefs.appIconImage:'',theme:['light','dark','system'].includes(raw.prefs?.theme)?raw.prefs.theme:'light',onboard:!!raw.prefs?.onboard,toolOrder:Array.isArray(raw.prefs?.toolOrder)?raw.prefs.toolOrder.filter(x=>typeof x==='string'):[],linkOrder:Array.isArray(raw.prefs?.linkOrder)?raw.prefs.linkOrder.filter(x=>typeof x==='string'):[],bottomNav:Array.isArray(raw.prefs?.bottomNav)?raw.prefs.bottomNav.filter(x=>typeof x==='string'):[],folders:{web:Array.isArray(raw.prefs?.folders?.web)?raw.prefs.folders.web.filter(x=>typeof x==='string'):[],app:Array.isArray(raw.prefs?.folders?.app)?raw.prefs.folders.app.filter(x=>typeof x==='string'):[],game:Array.isArray(raw.prefs?.folders?.game)?raw.prefs.folders.game.filter(x=>typeof x==='string'):[]},photoAlbums:Array.isArray(raw.prefs?.photoAlbums)?raw.prefs.photoAlbums.filter(x=>typeof x==='string').slice(0,200):[],defaultBrowser:validBrowser(raw.prefs?.defaultBrowser,'safari'),searchBrowser:validBrowser(raw.prefs?.searchBrowser,'safari'),searchEngine:['google','duckduckgo','bing'].includes(raw.prefs?.searchEngine)?raw.prefs.searchEngine:'google',homeSections:Array.isArray(raw.prefs?.homeSections)?raw.prefs.homeSections.filter(x=>typeof x==='string'):[],hiddenSections:Array.isArray(raw.prefs?.hiddenSections)?raw.prefs.hiddenSections.filter(x=>typeof x==='string'):[],civilizationAdded:true}};
   }
   let state;
   let storageAvailable=true;
@@ -284,7 +298,7 @@
   let toastTimer;
   function showToast(message){const node=$('#toast');node.textContent=message;node.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('visible'),2300);}
   const iconTile=(icon,color='purple',data='')=>tile(icon,color,data);
-  const pageHeading=(title,desc)=>`<div class="topbar"><div><p class="kicker"><span class="brand-icon-mini" aria-hidden="true">${imageDataOk(state.prefs.appIconImage)?`<img src="${state.prefs.appIconImage}" alt="">`:svgIcon(state.prefs.appIconKey||'grid')}</span>${esc(state.prefs.appName||'My Toolbox')} · 1.1.1</p><h1>${esc(title)}</h1></div><div class="header-actions"><button type="button" class="circle-button menu-trigger" data-action="toggle-drawer" aria-label="クイックメニューを開く" aria-haspopup="dialog" aria-expanded="${ui.drawerOpen}">☰</button></div></div>${desc?`<p class="page-intro">${esc(desc)}</p>`:''}`;
+  const pageHeading=(title,desc)=>`<div class="topbar"><div><p class="kicker"><span class="brand-icon-mini" aria-hidden="true">${imageDataOk(state.prefs.appIconImage)?`<img src="${state.prefs.appIconImage}" alt="">`:svgIcon(state.prefs.appIconKey||'grid')}</span>${esc(state.prefs.appName||'My Toolbox')} · 1.1.2</p><h1>${esc(title)}</h1></div><div class="header-actions"><button type="button" class="circle-button menu-trigger" data-action="toggle-drawer" aria-label="クイックメニューを開く" aria-haspopup="dialog" aria-expanded="${ui.drawerOpen}">☰</button></div></div>${desc?`<p class="page-intro">${esc(desc)}</p>`:''}`;
   const empty=(icon,message)=>`<div class="empty"><div class="empty-icon">${icon}</div>${message}</div>`;
   const listStats = id => {const list=getList(id);return list?counts(list.items):{done:0,total:0};};
   const countPending = id => {const s=listStats(id);return s.total-s.done;};
@@ -343,7 +357,7 @@
       search:`<section class="home-web"><form data-form="web-search" class="web-search-form"><span aria-hidden="true">${svgIcon('search')}</span><input class="field" name="query" enterkeyhint="search" autocomplete="off" placeholder="Webで検索" aria-label="Web検索のキーワード" required><button class="primary-btn" type="submit">検索</button></form><button type="button" class="tiny-link" data-action="go" data-page="search">${svgIcon('search')} 保存した項目を探す ›</button></section>`,
       habits:habitCard(),
       tools:`<div class="section-heading"><h2>ツールボックス</h2><button class="tiny-link" data-action="reorder-tools">並べ替え</button></div><div class="tool-grid">${orderedTools.map(t=>`<button type="button" class="tool-card" data-action="go" data-page="${t.id}" ${t.listId?`data-list="${t.listId}"`:''}><span class="tool-icon tile-${t.color}" aria-hidden="true">${svgIcon(t.icon)}</span><div><div class="tool-name">${t.name}</div><div class="tool-description">${t.desc}</div></div></button>`).join('')}</div>`,
-      favorites:`<div class="section-heading"><h2>お気に入り</h2><span class="favorite-nav"><button class="tiny-link" data-action="go" data-page="links">リンク ›</button><button class="tiny-link" data-action="go" data-page="apps">アプリ ›</button></span></div>${favorites.length?`<div class="quick-links">${favorites.map(x=>`<button type="button" class="quick-card" data-link-id="${esc(x.id)}" data-action="open-link" data-id="${esc(x.id)}">${iconTile(x.iconKey||x.icon,'gray',x.iconImage)}<span style="min-width:0"><div class="name">${esc(x.name)}</div><div class="meta">${esc(urlLabel(x.url))}</div></span></button>`).join('')}</div>`:empty(svgIcon('bookmark'),'リンク・アプリの登録画面でお気に入りを設定できます。')}`,
+      favorites:`<div class="section-heading"><h2>お気に入り</h2><span class="favorite-nav"><button class="tiny-link" data-action="go" data-page="links">リンク ›</button><button class="tiny-link" data-action="go" data-page="apps">アプリ ›</button></span></div>${favorites.length?`<div class="quick-links">${favorites.map(x=>`<button type="button" class="quick-card" data-link-id="${esc(x.id)}" data-action="open-link" data-id="${esc(x.id)}">${x.id===CIVILIZATION_ID&&!imageDataOk(x.iconImage)?`<span class="icon-tile tile-gray"><img src="./games/civilization/icon-192.png" alt="" class="custom-link-icon"></span>`:iconTile(x.iconKey||x.icon,'gray',x.iconImage)}<span style="min-width:0"><div class="name">${esc(x.name)}</div><div class="meta">${esc(x.id===CIVILIZATION_ID&&x.url===CIVILIZATION_URL?'内蔵ゲーム':urlLabel(x.url))}</div></span></button>`).join('')}</div>`:empty(svgIcon('bookmark'),'リンク・アプリの登録画面でお気に入りを設定できます。')}`,
       recent:`<div class="section-heading"><h2>最近のメモ</h2><button class="tiny-link" data-action="go" data-page="notes">一覧を見る ›</button></div>${recent?`<button type="button" class="note-peek" data-action="edit-note" data-id="${esc(recent.id)}"><div class="note-title">${esc(recent.title)}</div><div class="note-body">${esc(recent.body||'本文なし')}</div></button>`:empty(svgIcon('note'),'まだメモがありません。')}`
     };
     const order=HOME_SECTIONS.map(x=>x[0]).sort((a,b)=>{const prefs=state.prefs.homeSections||[];return (prefs.indexOf(a)<0?999:prefs.indexOf(a))-(prefs.indexOf(b)<0?999:prefs.indexOf(b));});
@@ -538,10 +552,16 @@
         .replace(/(rel="icon"[^>]*href="[^"?]+)(?:\?[^"]*)?("[^>]*>)/,(_,a,b)=>a+'?brand='+stamp+b);
       manifest.icons=manifest.icons.map(icon=>({...icon,src:icon.src.replace(/\?.*$/,'')+'?brand='+stamp}));
       // A different cache name forces the existing service worker to refresh static icon assets.
-      texts[3]=texts[3].replace(/(const CACHE_VERSION = ')[^']+(';)/,(_,a,b)=>a+`v1.1.1-github-pages-brand-${stamp}`+b);
+      texts[3]=texts[3].replace(/(const CACHE_VERSION = ')[^']+(';)/,(_,a,b)=>a+`v1.1.2-github-pages-brand-${stamp}`+b);
       const encode=new TextEncoder(),entries=files.map((name,i)=>[name,encode.encode(texts[i])]);
       entries.push(['manifest.webmanifest',encode.encode(JSON.stringify(manifest,null,2))]);
       entries.push(['.nojekyll',new Uint8Array(0)]);
+      // Do not lose the integrated game when exporting a custom-icon website ZIP.
+      // Copy the CURRENT published files, so game updates remain independently replaceable.
+      const bundledText=['game-player.html','games/civilization/index.html','games/civilization/game.js','games/civilization/style.css','games/civilization/manifest.webmanifest','games/civilization/README.md'];
+      const bundledImages=['games/civilization/icon-180.png','games/civilization/icon-192.png','games/civilization/icon-512.png'];
+      for(const path of bundledText){const response=await fetch('./'+path,{cache:'no-store'});if(!response.ok)throw Error(path+'の取得に失敗');entries.push([path,encode.encode(await response.text())]);}
+      for(const path of bundledImages){const response=await fetch('./'+path,{cache:'no-store'});if(!response.ok)throw Error(path+'の取得に失敗');entries.push([path,new Uint8Array(await response.arrayBuffer())]);}
       for(const [file,size] of [['icons/icon-192.png',192],['icons/icon-512.png',512],['icons/apple-touch-icon.png',180],['icons/icon-1024.png',1024]])entries.push([file,await brandedPng(size)]);
       const zip=zipStore(entries),url=URL.createObjectURL(zip),a=document.createElement('a');a.href=url;a.download='my-toolbox-custom-home-icon.zip';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
       showToast('サイト更新用ZIPを保存しました。');
@@ -569,7 +589,7 @@
     <div class="folder-strip"><button class="folder-chip ${currentFolder==='__all__'?'selected':''}" data-action="select-folder" data-kind="${kind}" data-folder="__all__">すべて</button>${folders.map(f=>`<button class="folder-chip ${currentFolder===f?'selected':''}" data-action="select-folder" data-kind="${kind}" data-folder="${esc(f)}">${svgIcon('folder')} ${esc(f)}</button>`).join('')}<button class="folder-chip" data-action="new-folder" data-kind="${kind}">＋ フォルダ</button><button class="folder-chip ${currentFolder==='__uncategorized__'?'selected':''}" data-action="select-folder" data-kind="${kind}" data-folder="__uncategorized__">未分類</button></div>
     <p class="folder-hint">「すべて」は全項目、「未分類」はフォルダ未設定の項目を表示します。</p><button class="tiny-link" data-action="reorder-links" data-kind="${kind}" data-folder="${esc(currentFolder)}">順序変更</button>
     ${filtered.length?`<div class="link-list">${filtered.map(link=>`<div class="link-card" data-link-id="${esc(link.id)}">
-      <button type="button" class="link-open" data-action="open-link" data-id="${esc(link.id)}">${iconTile(link.iconKey||link.icon,kind==='web'?'purple':'blue',link.iconImage)}<span style="min-width:0;width:100%"><div class="card-name">${esc(link.name)}</div><div class="card-url">${esc(urlLabel(link.url))}</div></span></button>
+      <button type="button" class="link-open" data-action="open-link" data-id="${esc(link.id)}">${link.id===CIVILIZATION_ID&&!imageDataOk(link.iconImage)?`<span class="icon-tile tile-blue"><img src="./games/civilization/icon-192.png" alt="" class="custom-link-icon"></span>`:iconTile(link.iconKey||link.icon,kind==='web'?'purple':'blue',link.iconImage)}<span style="min-width:0;width:100%"><div class="card-name">${esc(link.name)}</div><div class="card-url">${esc(link.id===CIVILIZATION_ID&&link.url===CIVILIZATION_URL?'内蔵ゲーム · オフライン対応':urlLabel(link.url))}</div></span></button>
       <div class="link-actions"><button type="button" data-action="favorite-link" data-id="${esc(link.id)}" aria-label="お気に入り切替" class="${link.favorite?'favorite':''}">${link.favorite?'★ お気に入り':'☆ お気に入り'}</button><button type="button" data-action="edit-link" data-id="${esc(link.id)}">編集 ›</button></div>
     </div>`).join('')}</div>`:empty(svgIcon(kind==='game'?'game':'search'),'このフォルダには登録がありません。＋ から追加できます。')}`;
   }
@@ -735,7 +755,7 @@
       <div class="setting-row"><div><b>バックアップを読み込む</b><small>現在の内容が置き換わります</small></div><button class="secondary-btn" data-action="import">読込</button></div>
       <div class="setting-row"><div><b>デモデータに初期化</b><small>写真も含めて全削除します</small></div><button class="danger-btn" data-action="reset">初期化</button></div>
     </div></section>
-    <section class="settings-group"><p class="settings-title">このアプリについて</p><div class="card"><div class="setting-row"><div><b>My Toolbox v1.1.1</b><small>HTML / CSS / JavaScript / Service Worker<br>無料で動作する個人用PWAの試作品</small></div></div><div class="setting-row"><div><b>カレンダーとGoogle連携</b><small>予定は端末に保存。Googleへの転記は登録画面から手動で確定します。Google側の予定取得・双方向同期はありません。</small></div></div><div class="setting-row"><div><b>データの保存先</b><small>予定やメモはlocalStorage、写真はIndexedDBに保存。クラウド同期はありません。</small></div></div><div class="setting-row"><div><b>アプリ・ゲームへのリンク</b><small>Universal Linkや公式のアプリURLが必要です。OSやアプリ側の制限で開けない場合があります。</small></div></div><div class="setting-row"><div><b>機能の追加</b><small>「マイリスト」ではリストを自由に増やせます。新しい種類のツールはコード追加で拡張できます。</small></div></div></div></section>
+    <section class="settings-group"><p class="settings-title">このアプリについて</p><div class="card"><div class="setting-row"><div><b>My Toolbox v1.1.2</b><small>HTML / CSS / JavaScript / Service Worker<br>無料で動作する個人用PWAの試作品</small></div></div><div class="setting-row"><div><b>カレンダーとGoogle連携</b><small>予定は端末に保存。Googleへの転記は登録画面から手動で確定します。Google側の予定取得・双方向同期はありません。</small></div></div><div class="setting-row"><div><b>データの保存先</b><small>予定やメモはlocalStorage、写真はIndexedDBに保存。クラウド同期はありません。</small></div></div><div class="setting-row"><div><b>アプリ・ゲームへのリンク</b><small>Universal Linkや公式のアプリURLが必要です。OSやアプリ側の制限で開けない場合があります。</small></div></div><div class="setting-row"><div><b>機能の追加</b><small>「マイリスト」ではリストを自由に増やせます。新しい種類のツールはコード追加で拡張できます。</small></div></div></div></section>
     <div class="feature-tip"><span>${svgIcon('bookmark')}</span><p>ログインやサーバーへのデータ送信機能はありません。Web公開した場合も、メモの内容が自動で公開されるわけではありません。ただしブラウザデータの消去に備え、バックアップを取ってください。</p></div>
     <input type="file" id="import-file" accept=".json,application/json" hidden>`;
   }
@@ -1000,6 +1020,12 @@
   }
   function openLink(id){
     const link=state.links.find(x=>x.id===id);if(!link)return;
+    if(link.id===CIVILIZATION_ID && link.url===CIVILIZATION_URL){
+      // Same-scope navigation keeps the game in the installed PWA.
+      // It does not use the external browser setting or the toolbox gesture handler.
+      window.location.assign(new URL(CIVILIZATION_URL,document.baseURI).href);
+      return;
+    }
     const url=normalizedUrl(link.url);if(!url){showToast('このURLは開けません。');return;}
     openExternal(url,link.kind==='web'?(link.browser&&link.browser!=='inherit'?link.browser:state.prefs.defaultBrowser):'system');
   }
@@ -1217,7 +1243,9 @@
       });
       closeModal();showToast('マイカレンダーに保存しました。');
     }else if(kind==='link'){
-      const name=String(f.get('name')||'').trim(),url=normalizedUrl(String(f.get('url')||''));
+      const name=String(f.get('name')||'').trim();
+      const entered=String(f.get('url')||'').trim();
+      const url=id===CIVILIZATION_ID&&entered===CIVILIZATION_URL?CIVILIZATION_URL:normalizedUrl(entered);
       if(!name||!url){alert('名前と正しいURLを入力してください。');return;}
       const kind=['web','app','game'].includes(f.get('kind'))?f.get('kind'):'web';
       mutate(()=>{const rec={id:id||uid(),name,url,icon:'🔗',iconKey:legacyIcon(String(f.get('iconKey')||(kind==='app'?'game':'link'))),iconImage:imageDataOk(f.get('iconImage'))?f.get('iconImage'):'',kind,category:String(f.get('category')||'').trim(),folder:String(f.get('folder')||'').trim().slice(0,100),favorite:f.has('favorite'),browser:['inherit',...BROWSERS.map(x=>x[0])].includes(f.get('browser'))?f.get('browser'):'inherit'};const idx=state.links.findIndex(x=>x.id===id);if(idx>=0)state.links[idx]=rec;else state.links.push(rec);});

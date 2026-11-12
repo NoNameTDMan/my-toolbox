@@ -1,3 +1,5 @@
+> **過去のNetlify→GitHub Pages初回移行用ガイドです。** 既にGitHub Pagesを利用している場合のv1.1.2更新は `INTEGRATION_GUIDE.md` を参照してください。
+
 # My Toolbox：Netlify → GitHub Pages 移行・復元チェックリスト
 
 作成日：2026-11-12 / 対象：My Toolbox v1.1.1 GitHub Pages移行対応版

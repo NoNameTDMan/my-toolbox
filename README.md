@@ -1,8 +1,20 @@
-# My Toolbox v1.1.1 — GitHub Pages 移行対応版
+## 既にGitHub Pagesへ移行済みの場合
 
-**Netlify版の機能・データ形式・画面デザインは維持しています。** 変更点はGitHub Pagesへの移行に必要な公開・キャッシュ処理と、公開方法に関する説明です。
+- **公開先のリポジトリは変更せず**、このZIPを展開した中身をリポジトリ直下に反映してください。
+- 変更前にツールボックスのJSONバックアップと、独立公開中の**「文明の種」のゲーム内JSONバックアップを別々に保存**してください。
+- 「文明の種」は「ゲーム」一覧に**通常のゲームカードとして追加**され、`games/civilization/` に同梱されています。起動するとPWA内の全画面プレーヤーで開き、「ホームへ戻る」からPWAへ戻れます。
+- 既存のルービックキューブやその他ゲームリンクはそのままです。
+- **ゲームの進行データはツールボックスのJSONバックアップには入りません。** 必要に応じてゲーム専用JSONをゲーム内から読み込んでください。
+- 今後のゲーム更新は `games/civilization/` 内のファイルだけを置き換える方法に対応します。詳細は [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md) を参照してください。
+- ZIPをGitHubにそのまま置くのではなく、**展開済みのファイルとフォルダをアップロード**してください。バックアップJSONは公開リポジトリに入れないでください。
 
-- **先に `MIGRATION_GUIDE.md` を読み、旧PWAからJSONバックアップを取得してください。**
+---
+
+# My Toolbox v1.1.2 — 「文明の種」v0.6.0 統合版（GitHub Pages）
+
+**既存のツールボックス機能・データ形式・画面デザインは維持しています。** 今回は「文明の種」をゲーム一覧の通常項目として追加し、独立ページ、キャッシュ、更新ガイドを同梱しました。
+
+- 初めてNetlifyから移行する場合のみ `MIGRATION_GUIDE.md` を参照してください。既に移行済みなら今回の更新は `INTEGRATION_GUIDE.md` を参照してください。
 - 新サイトでデータを自動的に引き継ぐことはできません。旧PWAの「設定 → バックアップを書き出す」で保存したJSONを、新PWAの「設定 → バックアップを読み込む」から復元します。
 - バックアップJSONにはメモ・予定・写真などの個人情報が含まれます。**GitHubの公開リポジトリへ絶対にアップロードしないでください。**
 - GitHub Pagesでの基本URLは `https://USERNAME.github.io/REPOSITORY/` です。
@@ -13,6 +25,7 @@
 
 ```
 index.html
+game-player.html
 app.js
 styles.css
 sw.js
@@ -22,11 +35,22 @@ icons/
   icon-192.png
   icon-512.png
   icon-1024.png
+games/
+  civilization/
+    index.html
+    game.js
+    style.css
+    manifest.webmanifest
+    icon-180.png
+    icon-192.png
+    icon-512.png
+    README.md
 .nojekyll
 .gitignore
 README.md
 FEATURE_GUIDE.md
 MIGRATION_GUIDE.md
+INTEGRATION_GUIDE.md
 ```
 
 `manifest.webmanifest` の `start_url` / `scope` と、各リソース参照・Service Worker登録は相対パスです。リポジトリが `my-toolbox` 以外の名前でも原則変更不要です。
