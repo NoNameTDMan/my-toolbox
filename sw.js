@@ -2,14 +2,14 @@
  * Limit cache and cleanup to THIS site's path. github.io hosts many repositories
  * under one origin, so deleting all origin caches would harm unrelated apps.
  */
-const CACHE_VERSION = 'v1.1.2-github-pages-civilization-1';
+const CACHE_VERSION = 'v1.1.3-github-pages-civilization-safety-1';
 const SCOPE_URL = new URL(self.registration.scope);
 const CACHE_PREFIX = `my-toolbox:${encodeURIComponent(SCOPE_URL.pathname)}:`;
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/icon-1024.png',
-  './game-player.html',
+  './game-player.html', './recovery.html',
   './games/civilization/index.html', './games/civilization/style.css', './games/civilization/game.js',
   './games/civilization/manifest.webmanifest',
   './games/civilization/icon-180.png', './games/civilization/icon-192.png', './games/civilization/icon-512.png'

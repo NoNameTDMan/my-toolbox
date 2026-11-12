@@ -1,5 +1,5 @@
 /**
- * My Toolbox v1.1.2
+ * My Toolbox v1.1.3
  * Created: 2026-11-09
  * Author: Personal project / ChatGPT (prototype)
  * Zero-dependency PWA. Text data stays in localStorage; photos use IndexedDB. Backups include both.
@@ -226,7 +226,10 @@
   let dataLoadError=false;
   try {
     const saved=localStorage.getItem(STORE_KEY);
-    state=saved?normalize(JSON.parse(saved)):defaultData();
+    const previous=localStorage.getItem(STORE_KEY+'-last-good');
+    let storedValue=saved;
+    if(!storedValue&&previous){const candidate=JSON.parse(previous);if(candidate&&Array.isArray(candidate.links)&&Array.isArray(candidate.lists))storedValue=previous;}
+    state=storedValue?normalize(JSON.parse(storedValue)):defaultData();
     try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(writeError){storageAvailable=false;console.warn('Local storage write failed',writeError);}
   } catch(error) {
     state=defaultData();
@@ -293,12 +296,12 @@
   const taskDueOn=day=>getList('tasks')?.items.filter(x=>x.category==='todo'&&!x.done&&x.due===day)||[];
   const taskDueSoon=()=>getList('tasks')?.items.filter(x=>x.category==='todo'&&!x.done&&x.due&&x.due<=dateKey())||[];
   ensureHabitDay();
-  const save=()=>{if(dataLoadError){showToast('旧データを保護中です。バックアップの復元を利用してください。');return false;}try{localStorage.setItem(STORE_KEY,JSON.stringify(state));storageAvailable=true;return true;}catch(error){storageAvailable=false;showToast('保存できませんでした。設定を確認してください。');return false;}};
+  const save=()=>{if(dataLoadError){showToast('旧データを保護中です。バックアップの復元を利用してください。');return false;}try{const old=localStorage.getItem(STORE_KEY);if(old){try{const test=JSON.parse(old);if(test&&Array.isArray(test.links)&&Array.isArray(test.lists))localStorage.setItem(STORE_KEY+'-last-good',old);}catch(_){}}localStorage.setItem(STORE_KEY,JSON.stringify(state));storageAvailable=true;return true;}catch(error){storageAvailable=false;showToast('保存できませんでした。設定を確認してください。');return false;}};
   const mutate=fn=>{fn();save();render();};
   let toastTimer;
   function showToast(message){const node=$('#toast');node.textContent=message;node.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('visible'),2300);}
   const iconTile=(icon,color='purple',data='')=>tile(icon,color,data);
-  const pageHeading=(title,desc)=>`<div class="topbar"><div><p class="kicker"><span class="brand-icon-mini" aria-hidden="true">${imageDataOk(state.prefs.appIconImage)?`<img src="${state.prefs.appIconImage}" alt="">`:svgIcon(state.prefs.appIconKey||'grid')}</span>${esc(state.prefs.appName||'My Toolbox')} · 1.1.2</p><h1>${esc(title)}</h1></div><div class="header-actions"><button type="button" class="circle-button menu-trigger" data-action="toggle-drawer" aria-label="クイックメニューを開く" aria-haspopup="dialog" aria-expanded="${ui.drawerOpen}">☰</button></div></div>${desc?`<p class="page-intro">${esc(desc)}</p>`:''}`;
+  const pageHeading=(title,desc)=>`<div class="topbar"><div><p class="kicker"><span class="brand-icon-mini" aria-hidden="true">${imageDataOk(state.prefs.appIconImage)?`<img src="${state.prefs.appIconImage}" alt="">`:svgIcon(state.prefs.appIconKey||'grid')}</span>${esc(state.prefs.appName||'My Toolbox')} · 1.1.3</p><h1>${esc(title)}</h1></div><div class="header-actions"><button type="button" class="circle-button menu-trigger" data-action="toggle-drawer" aria-label="クイックメニューを開く" aria-haspopup="dialog" aria-expanded="${ui.drawerOpen}">☰</button></div></div>${desc?`<p class="page-intro">${esc(desc)}</p>`:''}`;
   const empty=(icon,message)=>`<div class="empty"><div class="empty-icon">${icon}</div>${message}</div>`;
   const listStats = id => {const list=getList(id);return list?counts(list.items):{done:0,total:0};};
   const countPending = id => {const s=listStats(id);return s.total-s.done;};
@@ -552,13 +555,13 @@
         .replace(/(rel="icon"[^>]*href="[^"?]+)(?:\?[^"]*)?("[^>]*>)/,(_,a,b)=>a+'?brand='+stamp+b);
       manifest.icons=manifest.icons.map(icon=>({...icon,src:icon.src.replace(/\?.*$/,'')+'?brand='+stamp}));
       // A different cache name forces the existing service worker to refresh static icon assets.
-      texts[3]=texts[3].replace(/(const CACHE_VERSION = ')[^']+(';)/,(_,a,b)=>a+`v1.1.2-github-pages-brand-${stamp}`+b);
+      texts[3]=texts[3].replace(/(const CACHE_VERSION = ')[^']+(';)/,(_,a,b)=>a+`v1.1.3-github-pages-brand-${stamp}`+b);
       const encode=new TextEncoder(),entries=files.map((name,i)=>[name,encode.encode(texts[i])]);
       entries.push(['manifest.webmanifest',encode.encode(JSON.stringify(manifest,null,2))]);
       entries.push(['.nojekyll',new Uint8Array(0)]);
       // Do not lose the integrated game when exporting a custom-icon website ZIP.
       // Copy the CURRENT published files, so game updates remain independently replaceable.
-      const bundledText=['game-player.html','games/civilization/index.html','games/civilization/game.js','games/civilization/style.css','games/civilization/manifest.webmanifest','games/civilization/README.md'];
+      const bundledText=['recovery.html','SAFE_GAME_FIX.md','INTEGRATION_GUIDE.md','game-player.html','games/civilization/index.html','games/civilization/game.js','games/civilization/style.css','games/civilization/manifest.webmanifest','games/civilization/README.md'];
       const bundledImages=['games/civilization/icon-180.png','games/civilization/icon-192.png','games/civilization/icon-512.png'];
       for(const path of bundledText){const response=await fetch('./'+path,{cache:'no-store'});if(!response.ok)throw Error(path+'の取得に失敗');entries.push([path,encode.encode(await response.text())]);}
       for(const path of bundledImages){const response=await fetch('./'+path,{cache:'no-store'});if(!response.ok)throw Error(path+'の取得に失敗');entries.push([path,new Uint8Array(await response.arrayBuffer())]);}
@@ -753,9 +756,10 @@
     <section class="settings-group"><p class="settings-title">データとバックアップ</p><div class="card">
       <div class="setting-row"><div><b>バックアップを書き出す</b><small>予定・リンク・リスト・メモ・写真をJSONに保存（写真が多いと大容量）</small></div><button class="secondary-btn" data-action="backup">保存</button></div>
       <div class="setting-row"><div><b>バックアップを読み込む</b><small>現在の内容が置き換わります</small></div><button class="secondary-btn" data-action="import">読込</button></div>
+      <div class="setting-row"><div><b>データ救出（読み取り専用）</b><small>消えたように見える保存データを確認・書き出し</small></div><a href="./recovery.html" class="secondary-btn" style="text-decoration:none">開く</a></div>
       <div class="setting-row"><div><b>デモデータに初期化</b><small>写真も含めて全削除します</small></div><button class="danger-btn" data-action="reset">初期化</button></div>
     </div></section>
-    <section class="settings-group"><p class="settings-title">このアプリについて</p><div class="card"><div class="setting-row"><div><b>My Toolbox v1.1.2</b><small>HTML / CSS / JavaScript / Service Worker<br>無料で動作する個人用PWAの試作品</small></div></div><div class="setting-row"><div><b>カレンダーとGoogle連携</b><small>予定は端末に保存。Googleへの転記は登録画面から手動で確定します。Google側の予定取得・双方向同期はありません。</small></div></div><div class="setting-row"><div><b>データの保存先</b><small>予定やメモはlocalStorage、写真はIndexedDBに保存。クラウド同期はありません。</small></div></div><div class="setting-row"><div><b>アプリ・ゲームへのリンク</b><small>Universal Linkや公式のアプリURLが必要です。OSやアプリ側の制限で開けない場合があります。</small></div></div><div class="setting-row"><div><b>機能の追加</b><small>「マイリスト」ではリストを自由に増やせます。新しい種類のツールはコード追加で拡張できます。</small></div></div></div></section>
+    <section class="settings-group"><p class="settings-title">このアプリについて</p><div class="card"><div class="setting-row"><div><b>My Toolbox v1.1.3</b><small>HTML / CSS / JavaScript / Service Worker<br>無料で動作する個人用PWAの試作品</small></div></div><div class="setting-row"><div><b>カレンダーとGoogle連携</b><small>予定は端末に保存。Googleへの転記は登録画面から手動で確定します。Google側の予定取得・双方向同期はありません。</small></div></div><div class="setting-row"><div><b>データの保存先</b><small>予定やメモはlocalStorage、写真はIndexedDBに保存。クラウド同期はありません。</small></div></div><div class="setting-row"><div><b>アプリ・ゲームへのリンク</b><small>Universal Linkや公式のアプリURLが必要です。OSやアプリ側の制限で開けない場合があります。</small></div></div><div class="setting-row"><div><b>機能の追加</b><small>「マイリスト」ではリストを自由に増やせます。新しい種類のツールはコード追加で拡張できます。</small></div></div></div></section>
     <div class="feature-tip"><span>${svgIcon('bookmark')}</span><p>ログインやサーバーへのデータ送信機能はありません。Web公開した場合も、メモの内容が自動で公開されるわけではありません。ただしブラウザデータの消去に備え、バックアップを取ってください。</p></div>
     <input type="file" id="import-file" accept=".json,application/json" hidden>`;
   }

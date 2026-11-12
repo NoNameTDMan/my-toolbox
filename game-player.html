@@ -4,30 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#101a23">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>文明の種 | My Toolbox</title>
-  <style>
-    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101a23;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
-    iframe{position:absolute;inset:0;width:100%;height:100%;height:100dvh;border:0;background:#101a23;display:block}
-    .go-home{position:fixed;z-index:10;right:12px;bottom:calc(87px + env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center;gap:7px;min-height:43px;padding:0 13px;border:1px solid #a7c5b388;border-radius:13px;background:#162f35ee;backdrop-filter:blur(14px);color:#f3f6ed;font-size:12px;font-weight:750;box-shadow:0 5px 15px #0009;text-decoration:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-    .go-home:focus-visible{outline:2px solid #e5d297;outline-offset:2px}
-    .go-home svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-    @media(max-height:450px){.go-home{bottom:calc(68px + env(safe-area-inset-bottom));min-height:36px}}
-  </style>
+  <meta name="robots" content="noindex">
+  <title>文明の種へ移動中 | My Toolbox</title>
+  <style>html,body{height:100%;margin:0;background:#101a23;color:#edf4ef;font-family:system-ui,sans-serif;display:grid;place-items:center}a{color:#b0e2d2}</style>
 </head>
 <body>
-  <iframe id="game-frame" title="文明の種" src="./games/civilization/index.html" allow="fullscreen" loading="eager"></iframe>
-  <a class="go-home" id="go-home" href="./" aria-label="My Toolboxのホームに戻る"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 19l-7-7 7-7M4 12h16"/></svg><span>ホームへ戻る</span></a>
+  <main><p>文明の種を開いています。</p><p><a href="./games/civilization/index.html?toolbox=1">ゲームへ進む</a></p></main>
   <script>
-    // The game owns its save and runs in a separate browsing context.
-    // Trigger its existing pagehide save handler before leaving, including the
-    // synchronous localStorage fallback when IndexedDB cannot finish in time.
-    document.getElementById('go-home').addEventListener('click',function(event){
-      event.preventDefault();
-      try{document.getElementById('game-frame').contentWindow.dispatchEvent(new Event('pagehide'));}catch(_error){}
-      setTimeout(()=>window.location.assign('./'),160);
-    });
+    // Redirect in the top-level page. An embedded iframe can cause iOS WebKit
+    // lifecycle/storage problems when leaving and reopening an installed PWA.
+    location.replace(new URL('./games/civilization/index.html?toolbox=1', location.href).href);
   </script>
 </body>
 </html>

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101a23"><title>データ救出 | My Toolbox</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#edf5f6;background:#0e1921;color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:26px 18px 75px}main{max-width:650px;margin:auto}h1{font-size:23px;letter-spacing:.02em}p{line-height:1.75}.sub{color:#b8cbd1}.card{border:1px solid #425664;border-radius:16px;padding:15px;margin:12px 0;background:#172631}.row{display:flex;gap:12px;align-items:center;justify-content:space-between;border-bottom:1px solid #344650;padding:10px 0}.row:last-child{border:0}.key{font-size:13px;overflow-wrap:anywhere}.value{font-size:12px;color:#b6d9c9;text-align:right}.actions{display:grid;gap:9px;margin:20px 0}button,a.button{display:block;text-align:center;font-size:15px;font-weight:650;padding:13px;border:1px solid #7d9bad;border-radius:12px;background:#294856;color:#edf6fa;text-decoration:none}button:disabled{opacity:.4}.danger{color:#ffd3cb}.small{font-size:12px;color:#a9c2ce}#status{min-height:30px;white-space:pre-line;overflow-wrap:anywhere}
+</style></head>
+<body><main>
+<h1>データ救出・確認</h1>
+<p class="sub">このページはデータを<strong>読み取るだけ</strong>で、初期化・復元・上書きは行いません。通常の「設定 → バックアップ」とは異なり、保存領域に直接残っている内容を確認します。</p>
+<p class="small">iPhoneでは必ず<strong>ホーム画面版のMy Toolboxから</strong>この画面へ移動してください。Safariで同じURLを直接開いた場合、別の保存領域が見えることがあります。</p>
+<div class="card" id="results">保存領域を調べています…</div>
+<div class="actions"><button type="button" id="scan">もう一度確認</button><button type="button" id="export">読めるデータをJSONで書き出す</button><label for="game-source" class="small">ゲーム復元候補の選択</label><select id="game-source" style="width:100%;padding:12px;border:1px solid #7d9bad;border-radius:10px;background:#1b303c;color:#fff"></select><button type="button" id="game-export">選択した文明の種セーブを通常のJSONで保存</button><a class="button" href="./">ホームへ戻る</a></div>
+<p id="status" class="small" role="status"></p>
+<p class="small danger">このJSONにはメモ、写真、セーブなどの個人情報が含まれます。公開GitHubリポジトリにアップロードしないでください。</p>
+</main>
+<script>
+(()=>{'use strict';
+ const keys=['my-toolbox-data-v1','my-toolbox-data-v1-last-good','civilization-seed-save-v1','civilization-seed-save-v1-last-good','civilization-seed-save-v1-damaged-backup'];
+ let snapshot=null;
+ const $=s=>document.querySelector(s);
+ const html=s=>String(s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+ const name={"my-toolbox-data-v1":"ツールボックス（現在）","my-toolbox-data-v1-last-good":"ツールボックス（予備）","civilization-seed-save-v1":"文明の種（現在）","civilization-seed-save-v1-last-good":"文明の種（予備）","civilization-seed-save-v1-damaged-backup":"文明の種（破損データ退避）"};
+ async function readDB(dbName,store,key){
+  if(!window.indexedDB)return {status:'IndexedDB非対応'};
+  let db;
+  try{
+   db=await Promise.race([new Promise((resolve,reject)=>{const req=indexedDB.open(dbName);req.onupgradeneeded=()=>{req.transaction.abort();reject(Error('保存DBがありません'))};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||Error('DB読込失敗'))}),new Promise((_,reject)=>setTimeout(()=>reject(Error('DB読込タイムアウト')),5000))]);
+   if(!db.objectStoreNames.contains(store))return {status:'保存ストアなし'};
+   const value=await new Promise((resolve,reject)=>{const tx=db.transaction(store,'readonly');const req=key===undefined?tx.objectStore(store).getAll():tx.objectStore(store).get(key);req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error)});
+   return {status:'読込成功',value};
+  }catch(err){return {status:String(err?.message||err)}}finally{if(db)db.close()}
+ }
+ function explain(value){if(value===null||value===undefined)return 'データなし';try{if(typeof value==='string'){const o=JSON.parse(value);return value.length.toLocaleString()+'文字 / '+(o.savedAt?new Date(o.savedAt).toLocaleString('ja-JP'):'JSON')};if(Array.isArray(value))return value.length+'件';if(typeof value==='object')return (value.savedAt?new Date(value.savedAt).toLocaleString('ja-JP'):'データあり')}catch(_){return '内容の解析不可（原文あり）'}return 'データあり';}
+ async function scan(){
+  $('#status').textContent='読み取り中です…';$('#export').disabled=true;
+  const local={};for(const k of keys){try{local[k]=localStorage.getItem(k)}catch(err){local[k]='[READ_ERROR] '+err.message}}
+  const gameDB=await readDB('civilization-seed-db','saves','civilization-seed-save-v1');
+  const photos=await readDB('my-toolbox-photos-v1','photos');
+  snapshot={format:'my-toolbox-emergency-readonly-v1',exportedAt:new Date().toISOString(),origin:location.origin,local,gameDB:gameDB.value??null,gameDBStatus:gameDB.status,photoCount:Array.isArray(photos.value)?photos.value.length:null,photoDBStatus:photos.status,photoRecords:photos.value??null};
+  const opts=[];
+  for(const key of keys.filter(x=>x.startsWith('civilization-'))){try{const parsed=JSON.parse(local[key]);if(parsed&&parsed.schema===1&&parsed.resources)opts.push({name:name[key],value:parsed})}catch(_){}}
+  if(gameDB.value && gameDB.value.schema===1)opts.push({name:'文明の種（IndexedDB）',value:gameDB.value});
+  window.__recoveryGameCandidates=opts;
+  $('#game-source').innerHTML=opts.map((x,i)=>'<option value="'+i+'">'+html(x.name+' / 人口 '+x.value.population+' / '+(x.value.savedAt?new Date(x.value.savedAt).toLocaleString('ja-JP'):'日時不明'))+'</option>').join('');
+  $('#game-export').disabled=opts.length===0;
+  const data=[...keys.map(k=>[name[k],explain(local[k])]),['文明の種 IndexedDB',gameDB.status+' / '+explain(gameDB.value)],['写真 IndexedDB',photos.status+' / '+explain(photos.value)]];
+  $('#results').innerHTML=data.map(([k,v])=>'<div class="row"><span class="key">'+html(k)+'</span><span class="value">'+html(v)+'</span></div>').join('');
+  $('#status').textContent='確認しました。「データなし」だけの場合でも、別のブラウザ保存領域に残っている可能性があります。';$('#export').disabled=false;
+ }
+ const toDataURL=blob=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(blob)});
+ async function exportJSON(){if(!snapshot)return;$('#export').disabled=true;$('#status').textContent='JSONを準備中です（写真が多い場合は時間がかかります）…';try{
+  const out={...snapshot,photoRecords:null};
+  if(Array.isArray(snapshot.photoRecords)){
+   out.photoRecords=[];
+   for(const row of snapshot.photoRecords){const copy={...row};if(row.blob instanceof Blob)copy.blob=await toDataURL(row.blob);if(row.thumb instanceof Blob)copy.thumb=await toDataURL(row.thumb);out.photoRecords.push(copy)}
+  }
+  const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
+  if(blob.size>150*1024*1024)throw Error('データが150MBを超えました。写真の退避は通常のバックアップ機能をご利用ください。');
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='my-toolbox-emergency-'+new Date().toISOString().slice(0,10)+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);$('#status').textContent='救出用JSONを作成しました。iPhoneの「ファイル」で保存先を確認してください。\nこのファイルは直接インポート用ではなく、復旧解析・退避用です。';
+ }catch(e){$('#status').textContent='書き出しに失敗しました: '+e.message}finally{$('#export').disabled=false}}
+ function exportGame(){const which=Number($('#game-source').value),record=window.__recoveryGameCandidates?.[which];if(!record)return;
+   const blob=new Blob([JSON.stringify(record.value,null,2)],{type:'application/json'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='bunmei-recovered-'+new Date().toISOString().slice(0,10)+'-'+which+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),90000);$('#status').textContent='選択したゲームセーブを通常形式で保存しました。まずファイルとして保管し、復元はゲーム内の「データを読み込む」から行ってください。';}
+ $('#scan').addEventListener('click',scan);$('#export').addEventListener('click',exportJSON);$('#game-export').addEventListener('click',exportGame);scan();
+})();
+</script></body></html>
