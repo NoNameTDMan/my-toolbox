@@ -1,13 +1,13 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.7.0 (2026-11-13)
+ * Version: 0.7.2 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.7.0';
+  const VERSION = '0.7.2';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const OFFLINE_MIN_MS = 5000; // Short interruptions are not reported
@@ -135,6 +135,28 @@
       [[1e63,'Vg'],[1e60,'Nd'],[1e57,'Od'],[1e54,'Spd'],[1e51,'Sxd'],[1e48,'Qid'],[1e45,'Qad'],[1e42,'Td'],[1e39,'Dd'],[1e36,'Ud'],[1e33,'Dc'],[1e30,'No'],[1e27,'Oc'],[1e24,'Sp'],[1e21,'Sx'],[1e18,'Qi'],[1e15,'Qa'],[1e12,'T'],[1e9,'B'],[1e6,'M'],[1e3,'k']];
     for(const [scale,label] of units)if(n>=scale){const value=n/scale;return value.toFixed(value>=100?0:value>=10?1:decimals).replace(/\.0+$/,'').replace(/(\.\d*[1-9])0+$/,'$1')+label}
     return new Intl.NumberFormat('ja-JP',{maximumFractionDigits:n>=100?0:n>=10?1:2}).format(n);
+  }
+  // Full Japanese 4-digit grouping for headline counters and CPS.
+  // Uses the integer value represented by JavaScript Number; it cannot restore
+  // digits already lost to floating-point precision.
+  function formatJapaneseExact(n){
+    if(!Number.isFinite(n))return '—';
+    if(n<0)return '-'+formatJapaneseExact(-n);
+    if(n<1)return formatNumber(n);
+    let value=BigInt(Math.floor(n));
+    const names=['','万','億','兆','京','垓','秭','穣','溝','澗','正','載','極','恒河沙','阿僧祇','那由他','不可思議','無量大数'];
+    const parts=[];
+    let index=0;
+    while(value>0n){
+      const group=value%10000n;
+      if(group!==0n)parts.push(group.toString()+(names[index]??('×10^'+(index*4))));
+      value/=10000n;
+      index++;
+    }
+    return parts.reverse().join('')||'0';
+  }
+  function formatHeadlineNumber(n){
+    return state.numberFormat==='ja'?formatJapaneseExact(n):formatNumber(n);
   }
   function formatTierNumber(base,tier) {
     const n = base/TIERS[tier].factor;
@@ -297,15 +319,26 @@
     state.clay=Math.max(0,state.clay-u.cost);state.upgrades.push(id);
     if(!automatic){showToast(`${u.name} を購入！`);renderStats();renderShop()}markDirty();
   }
+  function updatePrestigePreview(){
+    // The settings panel is not rebuilt on each tick: update only its live fields.
+    if(activeTab!=='settings')return;
+    const amount=$('prestige-current-clay');
+    const points=$('prestige-preview-points');
+    const button=$('prestige-action-button');
+    if(amount)amount.textContent=formatHeadlineNumber(state.clay);
+    if(points)points.textContent=String(prestigeGain(state.clay));
+    if(button)button.disabled=state.clay<PRESTIGE_MIN;
+  }
   function renderStats(){
     const tier=getTier(state.lifetime);
-    el.amount.textContent=formatNumber(state.clay);
+    el.amount.textContent=formatHeadlineNumber(state.clay);
     el.tierName.textContent=TIERS[tier].name;
     el.rawAmount.textContent=`現在の進化：${TIERS[tier].name}`;
-    el.cps.textContent=formatNumber(getCps())+' /s';
+    el.cps.textContent=formatHeadlineNumber(getCps())+' /s';
     el.clickPower.textContent='+'+formatNumber(getClickPower());
-    el.lifetime.textContent=formatNumber(state.lifetime);
-    $("tier-lifetime").textContent=formatNumber(state.lifetime);
+    el.lifetime.textContent=formatHeadlineNumber(state.lifetime);
+    $("tier-lifetime").textContent=formatHeadlineNumber(state.lifetime);
+    updatePrestigePreview();
     $("auto-overlay").hidden=!state.autoMining;
     el.clayButton.disabled=state.autoMining;
     el.bonus.disabled=state.autoMining;
@@ -431,7 +464,7 @@
         ACHIEVEMENTS.map(a=>`<article class="achievement-row ${state.achievements.includes(a.id)?'done':''}"><div class="pixel-small">${state.achievements.includes(a.id)?'★':'?'}</div><div class="achievement-info"><div class="building-name">${safe(a.name)}</div><div class="building-sub">${safe(a.desc)}</div></div></article>`).join('');
     }else if(activeTab==='settings'){
       el.panel.innerHTML=`<div class="shop-title"><span>ゲーム設定</span><small>ver ${VERSION}</small></div>
-        <section class="settings-section"><h3>転生</h3><p>転生回数：${state.prestige} / 生産倍率：×${formatNumber(prestigeMultiplier(state))} / ボーナス粘土出現抽選確率：${(bonusChance()*100).toFixed(1)}%（毎分）</p><p>保有粘土10億以上で転生可能。転生時の保有粘土から獲得ポイントを計算します（累計生産量ではありません）。施設・強化・保有粘土はリセット。獲得ポイント1につき生産倍率×1.2、ボーナス抽選確率+0.5ポイント（最大20%）。</p><p>現在の保有粘土：${formatNumber(state.clay)} / 今転生すると：+${prestigeGain(state.clay)}ポイント</p><button class="danger-button" data-action="prestige" ${state.clay<PRESTIGE_MIN?'disabled':''}>転生する</button></section>
+        <section class="settings-section"><h3>転生</h3><p>転生回数：${state.prestige} / 生産倍率：×${formatNumber(prestigeMultiplier(state))} / ボーナス粘土出現抽選確率：${(bonusChance()*100).toFixed(1)}%（毎分）</p><p>保有粘土10億以上で転生可能。転生時の保有粘土から獲得ポイントを計算します（累計生産量ではありません）。施設・強化・保有粘土はリセット。獲得ポイント1につき生産倍率×1.2、ボーナス抽選確率+0.5ポイント（最大20%）。</p><p>現在の保有粘土：<span id="prestige-current-clay">${formatHeadlineNumber(state.clay)}</span> / 今転生すると：+<span id="prestige-preview-points">${prestigeGain(state.clay)}</span>ポイント</p><button id="prestige-action-button" class="danger-button" data-action="prestige" ${state.clay<PRESTIGE_MIN?'disabled':''}>転生する</button></section>
         <section class="settings-section"><h3>セーブとバックアップ</h3><p>セーブはこのゲーム専用の領域に保存されます。ほかのツールボックスデータや「文明の種」と混ざりません。10秒ごとの自動保存と予備セーブがあります。</p><div class="settings-buttons"><button class="small-button" data-action="save">今すぐセーブ</button><button class="small-button" data-action="export">JSONを書き出す</button><button class="small-button" data-action="import">JSONを読み込む</button></div></section>
         <section class="settings-section"><h3>表示設定</h3><label for="number-format">数値表記</label><select id="number-format"><option value="full" ${state.numberFormat==='full'?'selected':''}>省略なし</option><option value="ja" ${state.numberFormat==='ja'?'selected':''}>日本式（万・億・兆）</option><option value="short" ${state.numberFormat==='short'?'selected':''}>英語式（k・M・B）</option></select><p>省略なしでも計算精度はJavaScriptの数値型に依存します。</p><label><input type="checkbox" id="reduced-motion" ${state.reducedMotion?'checked':''}>タップ時の演出を軽量化</label></section>
         <section class="settings-section"><h3>進行と仕様</h3><p>進化に必要な累計生産量は段階が進むほど加速的に増加。生産・購入ともに内部では「粘土換算」で一元管理され、表示される粘土が進化しても資源は分裂しません。ボーナス粘土は時間限定で出現します。放置生産は最大8時間、通常速度の25%です。</p></section>
