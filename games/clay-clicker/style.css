@@ -77,3 +77,11 @@ body.in-toolbox .app{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
 .skill-owned{border-color:#8cbb86}.skill-ready{border-color:#c9a867}.skill-locked{opacity:.65}
 .skill-node button{font:inherit;padding:5px 2px;min-height:28px}
 @media(max-width:380px){.skill-tier{gap:4px}.skill-node{font-size:11px;padding:6px 3px}}
+
+/* v0.8.2: one statistic per row; wrap numbers without horizontal scrolling. */
+.production-panel .stats-strip{display:grid;grid-template-columns:minmax(0,1fr);gap:7px}
+.production-panel .stats-strip>div{width:100%;padding:9px 11px}
+.production-panel .stats-strip strong,.sticky-storage .current-amount,.tier-lifetime strong,#prestige-current-clay,#prestige-preview-points{display:block;max-width:100%;height:auto;min-height:0;white-space:normal;overflow-x:visible;overflow-y:visible;overflow-wrap:anywhere;word-break:break-word;line-height:1.45}
+.production-panel .stats-strip strong{font-size:clamp(13px,3.5vw,17px);margin-top:4px}
+.sticky-storage{max-height:none;overflow:visible}
+.sticky-storage .current-amount{font-size:clamp(19px,4vw,38px)}

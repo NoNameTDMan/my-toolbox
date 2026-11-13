@@ -343,7 +343,7 @@
     }
     const globalBonus=GLOBAL_LEVELS.reduce((a,_,j)=>a*(s.upgrades.includes(`g-${j}`)?1.6:1),1);
     const boosted=t<s.boostUntil?7:1;
-    const clicks=s.buildings[AUTO_CLICK_ID]*(Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(s.upgrades.includes(`c-${j}`)?1:0),0)))*Math.pow(RATIO,stage);
+    const clicks=s.buildings[AUTO_CLICK_ID]*(Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(s.upgrades.includes(`c-${j}`)?1:0),0)))*Math.pow(1.50,stage);
     result*=skillFactor('industry',.10,s)*skillFactor('machine',.20,s);
     const autoBonus=skillFactor('mine',.20,s)*skillFactor('auto',.15,s)*skillFactor('giant',.20,s);
     return (result*Math.pow(1.50,stage)*globalBonus+clicks*autoBonus)*boosted*prestigeMultiplier(s)*skillFactor('core',.05,s)*skillFactor('singularity',.30,s)*(t<(s.returnBoostUntil||0)?returnBoost(s):1);
@@ -359,7 +359,7 @@
   function getCps(){return getCpsAt(state,now())}
   function getClickPower(){
     let power=Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(upgradeOwned(`c-${j}`)?1:0),0));
-    power *= Math.pow(RATIO,getTier(state.lifetime));
+    power *= Math.pow(1.25,getTier(state.lifetime));
     return power*prestigeMultiplier(state)*skillFactor('core',.05)*skillFactor('singularity',.30)*skillFactor('mine',.20)*skillFactor('giant',.20)*(now()<state.returnBoostUntil?returnBoost(state):1);
   }
   function costFor(f,n=1,owned=state.buildings[f.id]){
