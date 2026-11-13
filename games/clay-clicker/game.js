@@ -1,13 +1,13 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.7.4 (2026-11-13)
+ * Version: 0.7.6 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.7.5';
+  const VERSION = '0.7.6';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const OFFLINE_MIN_MS = 5000; // Short interruptions are not reported
@@ -110,6 +110,14 @@
   function bonusChanceFrom(p){return Math.min(.20,Math.max(0,p||0)*.005)}
   function prestigeGain(clay){return clay<PRESTIGE_MIN?0:Math.max(1,Math.floor(Math.log10(clay/PRESTIGE_MIN+1)*3))}
   function prestigeMultiplier(s){return Math.pow(1.2,s.prestigePower??s.prestige??0)}
+  // Prestige multipliers are ratios, not clay quantities. Never run them
+  // through formatNumber/fullInteger, which truncate fractional bonuses.
+  function formatPrestigeMultiplier(value){
+    if(!Number.isFinite(value))return '—';
+    return value.toLocaleString('en-US',{
+      minimumFractionDigits:2,maximumFractionDigits:6,useGrouping:true
+    });
+  }
   function bonusChance(){return bonusChanceFrom(state.prestigeLuck??state.prestige)}
   function scheduleBonus(){state.bonusAt=bonusChance()>0?now()+60000:0}
   function fullInteger(n){
@@ -472,7 +480,7 @@
         ACHIEVEMENTS.map(a=>`<article class="achievement-row ${state.achievements.includes(a.id)?'done':''}"><div class="pixel-small">${state.achievements.includes(a.id)?'★':'?'}</div><div class="achievement-info"><div class="building-name">${safe(a.name)}</div><div class="building-sub">${safe(a.desc)}</div></div></article>`).join('');
     }else if(activeTab==='settings'){
       el.panel.innerHTML=`<div class="shop-title"><span>ゲーム設定</span><small>ver ${VERSION}</small></div>
-        <section class="settings-section"><h3>転生</h3><p>転生回数：${state.prestige} / 生産倍率：×${formatNumber(prestigeMultiplier(state))} / ボーナス粘土出現抽選確率：${(bonusChance()*100).toFixed(1)}%（毎分）</p><p>保有粘土10億以上で転生可能。転生時の保有粘土から獲得ポイントを計算します（累計生産量ではありません）。施設・強化・保有粘土はリセット。獲得ポイント1につき生産倍率×1.2、ボーナス抽選確率+0.5ポイント（最大20%）。</p><p>現在の保有粘土：<span id="prestige-current-clay">${formatHeadlineNumber(state.clay)}</span> / 今転生すると：+<span id="prestige-preview-points">${prestigeGain(state.clay)}</span>ポイント</p><button id="prestige-action-button" class="danger-button" data-action="prestige" ${state.clay<PRESTIGE_MIN?'disabled':''}>転生する</button></section>
+        <section class="settings-section"><h3>転生</h3><p>転生回数：${state.prestige} / 生産倍率：×${formatPrestigeMultiplier(prestigeMultiplier(state))} / ボーナス粘土出現抽選確率：${(bonusChance()*100).toFixed(1)}%（毎分）</p><p>保有粘土10億以上で転生可能。転生時の保有粘土から獲得ポイントを計算します（累計生産量ではありません）。施設・強化・保有粘土はリセット。獲得ポイント1につき生産倍率×1.2、ボーナス抽選確率+0.5ポイント（最大20%）。</p><p>現在の保有粘土：<span id="prestige-current-clay">${formatHeadlineNumber(state.clay)}</span> / 今転生すると：+<span id="prestige-preview-points">${prestigeGain(state.clay)}</span>ポイント</p><button id="prestige-action-button" class="danger-button" data-action="prestige" ${state.clay<PRESTIGE_MIN?'disabled':''}>転生する</button></section>
         <section class="settings-section"><h3>セーブとバックアップ</h3><p>セーブはこのゲーム専用の領域に保存されます。ほかのツールボックスデータや「文明の種」と混ざりません。10秒ごとの自動保存と予備セーブがあります。</p><div class="settings-buttons"><button class="small-button" data-action="save">今すぐセーブ</button><button class="small-button" data-action="export">JSONを書き出す</button><button class="small-button" data-action="import">JSONを読み込む</button></div></section>
         <section class="settings-section"><h3>表示設定</h3><label for="number-format">数値表記</label><select id="number-format"><option value="full" ${state.numberFormat==='full'?'selected':''}>省略なし</option><option value="ja" ${state.numberFormat==='ja'?'selected':''}>日本式（万・億・兆）</option><option value="short" ${state.numberFormat==='short'?'selected':''}>英語式（k・M・B）</option></select><p>省略なしでも計算精度はJavaScriptの数値型に依存します。</p><label><input type="checkbox" id="reduced-motion" ${state.reducedMotion?'checked':''}>タップ時の演出を軽量化</label></section>
         <section class="settings-section"><h3>進行と仕様</h3><p>進化に必要な累計生産量は段階が進むほど加速的に増加。生産・購入ともに内部では「粘土換算」で一元管理され、表示される粘土が進化しても資源は分裂しません。ボーナス粘土は時間限定で出現します。放置生産は最大8時間、通常速度の25%です。</p></section>
