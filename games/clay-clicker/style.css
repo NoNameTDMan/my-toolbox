@@ -42,3 +42,10 @@ body.in-toolbox .app{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
 .scene-instruction{position:relative;z-index:5;margin-top:8px;text-align:center}
 @media(max-width:810px){.sticky-storage{padding:9px 12px;max-height:min(30vh,180px)}.sticky-storage .current-amount{font-size:clamp(20px,6vw,28px)}.click-zone{height:205px;min-height:205px}.pixel-stage{overflow:hidden}.auto-tool{width:14px;height:18px}}
 @media(prefers-reduced-motion:reduce){.auto-tool{animation:none}}
+
+/* v0.5: tools orbit the clay object itself, inside the click-zone but sized to the button. */
+.auto-tools{position:absolute;inset:auto;left:50%;top:50%;transform:translate(-50%,-50%);
+ width:clamp(167px,32vw,216px);height:clamp(167px,32vw,216px);overflow:visible;z-index:2}
+.auto-tool{z-index:2}
+.auto-tool-count{right:-10px;bottom:-13px}
+@media(max-width:810px){.auto-tools{width:164px;height:164px}}
