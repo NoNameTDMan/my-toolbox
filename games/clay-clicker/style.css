@@ -13,3 +13,11 @@ body.in-toolbox .app{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
 .sticky-storage strong{display:block;font-size:clamp(16px,3vw,24px);color:#fff1cf;font-variant-numeric:tabular-nums;line-height:1.25}
 .current-amount{font-size:clamp(22px,4vw,40px);word-break:break-all;letter-spacing:0}
 @media(max-width:810px){.sticky-storage{top:env(safe-area-inset-top);max-height:100px}.current-amount{font-size:26px}}
+
+/* v0.3.0 additions */
+.sticky-storage[hidden]{display:none!important}
+.tier-lifetime{font-size:12px;color:#b7c8df;margin:10px 0;overflow-wrap:anywhere}.tier-lifetime strong{color:#ffe0ac}
+.auto-tools{position:absolute;inset:0;z-index:2;pointer-events:none}.auto-tool{position:absolute;font-size:22px;filter:drop-shadow(2px 2px #101629);animation:pick-swing 1.3s ease-in-out infinite alternate;transform-origin:center;pointer-events:none}.auto-tool-count{position:absolute;bottom:4px;right:4px;color:#ffe4ac;background:#222a44;padding:2px 5px;border:2px solid #586580;font-weight:900}
+@keyframes pick-swing{from{transform:rotate(-24deg)}to{transform:rotate(35deg)}}
+.auto-active .clay-button{filter:brightness(.55);pointer-events:none}.auto-overlay{position:absolute;inset:0;background:#10162d99;z-index:4;display:flex;flex-direction:column;justify-content:center;align-items:center;pointer-events:none;text-align:center;font-size:17px;font-weight:900;color:#ffe2a9;text-shadow:2px 2px #101629}.auto-overlay small{font-size:10px;margin-top:9px;color:#f5e7ce}
+.settings-section select{display:block;width:100%;max-width:310px;background:#25304e;border:2px solid #7788ad;color:#fff1d0;padding:10px;margin:7px 0 10px;font:inherit}

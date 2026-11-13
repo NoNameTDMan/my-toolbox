@@ -1,13 +1,13 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.2.0 (2026-11-13)
+ * Version: 0.3.0 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.2.0';
+  const VERSION = '0.3.0';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const MAX_OFFLINE_MS = 8 * 60 * 60 * 1000;
@@ -89,7 +89,7 @@
   const freshState = () => ({
     version:1,clay:0,lifetime:0,clicks:0,buildings: Array(FACILITIES.length).fill(0),
     upgrades:[],achievements:[],lastSaved:now(),boostUntil:0,
-    bonusAt:0,bonusUntil:0,reducedMotion:false,autoMining:false,prestige:0
+    bonusAt:0,bonusUntil:0,reducedMotion:false,autoMining:false,numberFormat:"full",prestige:0
   });
   let state = freshState();
   let gameLocked = false;
@@ -120,15 +120,15 @@
   }
   function totalOwned(s){return s.buildings.reduce((a,b)=>a+b,0)}
   function formatNumber(n, decimals=2) {
-    if (!Number.isFinite(n)) return '—';
-    if (n < 0) return `-${formatNumber(-n,decimals)}`;
-    if (n === 0) return '0';
-    if (n < 1) return n < .001 ? n.toExponential(2).replace('e-','×10^-') : n.toFixed(3).replace(/0+$/,'').replace(/\.$/,'');
-    if (n >= 1e24) return n.toExponential(2).replace('e+','×10^');
-    const large = [[1e20,'垓'],[1e16,'京'],[1e12,'兆'],[1e8,'億'],[1e4,'万']];
-    for (const [size,suffix] of large) {
-      if (n>=size) return (n/size).toFixed((n/size >=100 ? 0 : n/size>=10 ? 1 : decimals)).replace(/\.0+$/,'').replace(/(\.\d*[1-9])0+$/,'$1')+suffix;
-    }
+    if(!Number.isFinite(n))return '—';
+    if(state.numberFormat==='full')return fullInteger(n);
+    if(n<0)return '-'+formatNumber(-n,decimals);
+    if(n===0)return '0';
+    if(n<1)return n.toPrecision(3).replace(/\.?0+$/,'');
+    const units=state.numberFormat==='ja'?
+      [[1e68,'無量大数'],[1e64,'不可思議'],[1e60,'那由他'],[1e56,'阿僧祇'],[1e52,'恒河沙'],[1e48,'極'],[1e44,'載'],[1e40,'正'],[1e36,'澗'],[1e32,'溝'],[1e28,'穣'],[1e24,'秭'],[1e20,'垓'],[1e16,'京'],[1e12,'兆'],[1e8,'億'],[1e4,'万']]:
+      [[1e63,'Vg'],[1e60,'Nd'],[1e57,'Od'],[1e54,'Spd'],[1e51,'Sxd'],[1e48,'Qid'],[1e45,'Qad'],[1e42,'Td'],[1e39,'Dd'],[1e36,'Ud'],[1e33,'Dc'],[1e30,'No'],[1e27,'Oc'],[1e24,'Sp'],[1e21,'Sx'],[1e18,'Qi'],[1e15,'Qa'],[1e12,'T'],[1e9,'B'],[1e6,'M'],[1e3,'k']];
+    for(const [scale,label] of units)if(n>=scale){const value=n/scale;return value.toFixed(value>=100?0:value>=10?1:decimals).replace(/\.0+$/,'').replace(/(\.\d*[1-9])0+$/,'$1')+label}
     return new Intl.NumberFormat('ja-JP',{maximumFractionDigits:n>=100?0:n>=10?1:2}).format(n);
   }
   function formatTierNumber(base,tier) {
@@ -150,6 +150,7 @@
       if(s.buildings.length===FACILITIES.length-1)s.buildings.push(0);
       s.prestige=Number.isSafeInteger(s.prestige)&&s.prestige>=0&&s.prestige<=10000?s.prestige:0;
       s.autoMining=!!s.autoMining;
+      s.numberFormat=["full","ja","short"].includes(s.numberFormat)?s.numberFormat:"full";
       s.upgrades=Array.from(new Set(s.upgrades));
       s.achievements=s.achievements.filter(id=>ACHIEVEMENTS.some(a=>a.id===id));
       s.boostUntil=Number.isFinite(s.boostUntil)?s.boostUntil:0;
@@ -232,7 +233,7 @@
   }
   function gain(amount){if(!Number.isFinite(amount)||amount<=0)return;state.clay+=amount;state.lifetime+=amount;awardAchievements(true);markDirty()}
   function tap(){
-    if(gameLocked)return;
+    if(gameLocked||state.autoMining)return;
     const amount=getClickPower();gain(amount);state.clicks++;
     awardAchievements();
     renderStats();
@@ -245,18 +246,19 @@
     }
   }
   function purchaseFacility(id,automatic=false){
-    if(gameLocked)return;
+    if(gameLocked||(state.autoMining&&!automatic))return;
     const f=FACILITIES[id];if(!f)return;
-    const cost=costFor(f,buyAmount);
+    const quantity=automatic?1:buyAmount;
+    const cost=costFor(f,quantity);
     if(state.clay+1e-9<cost)return;
-    state.clay=Math.max(0,state.clay-cost);state.buildings[id]+=buyAmount;
+    state.clay=Math.max(0,state.clay-cost);state.buildings[id]+=quantity;
     awardAchievements();if(!automatic){renderStats();renderShop()}markDirty();
   }
-  function purchaseUpgrade(id){
+  function purchaseUpgrade(id,automatic=false){
     const u=UPGRADE_BY_ID.get(id);
-    if(gameLocked||!u||upgradeOwned(id)||!unlockedUpgrade(u)||state.clay+1e-9<u.cost)return;
+    if(gameLocked||(state.autoMining&&!automatic)||!u||upgradeOwned(id)||!unlockedUpgrade(u)||state.clay+1e-9<u.cost)return;
     state.clay=Math.max(0,state.clay-u.cost);state.upgrades.push(id);
-    showToast(`${u.name} を購入！`);renderStats();renderShop();markDirty();
+    if(!automatic){showToast(`${u.name} を購入！`);renderStats();renderShop()}markDirty();
   }
   function renderStats(){
     const tier=getTier(state.lifetime);
@@ -267,6 +269,12 @@
     el.cps.textContent=formatNumber(getCps())+' /s';
     el.clickPower.textContent='+'+formatNumber(getClickPower());
     el.lifetime.textContent=formatNumber(state.lifetime);
+    $("tier-lifetime").textContent=formatNumber(state.lifetime);
+    $("auto-overlay").hidden=!state.autoMining;
+    el.clayButton.disabled=state.autoMining;
+    el.bonus.disabled=state.autoMining;
+    $("pixel-stage").classList.toggle("auto-active",state.autoMining);
+    updateAutoTools();
     el.tierCounter.textContent=String(tier+1).padStart(2,'0')+' / '+TIERS.length;
     if(tier===TIERS.length-1){
       el.nextTier.textContent='最終形態「純反物質」に到達';el.nextTarget.textContent='以降も無限に生産可能';
@@ -285,6 +293,30 @@
     const bonusVisible=state.bonusUntil>now();el.bonus.hidden=!bonusVisible;
     if(activeTab==='upgrades')el.upgradeDot.hidden=true;
     else el.upgradeDot.hidden=!UPGRADES.some(u=>unlockedUpgrade(u)&&!upgradeOwned(u.id)&&state.clay>=u.cost);
+  }
+  let lastToolCount=-1;
+  function updateAutoTools(){
+    const count=state.buildings[AUTO_CLICK_ID];
+    const shown=Math.min(16,count);
+    if(shown===lastToolCount)return;
+    lastToolCount=shown;
+    const holder=$("auto-tools");holder.replaceChildren();
+    for(let i=0;i<shown;i++){
+      const tool=document.createElement('span');tool.className='auto-tool';tool.textContent='⛏';
+      const angle=(2*Math.PI*i/shown)-Math.PI/2;
+      tool.style.left=`${50+41*Math.cos(angle)}%`;
+      tool.style.top=`${50+42*Math.sin(angle)}%`;
+      tool.style.animationDelay=`${(i%8)*-.17}s`;
+      holder.append(tool);
+    }
+    if(count>16){const extra=document.createElement('span');extra.className='auto-tool-count';extra.textContent='×'+formatNumber(count);holder.append(extra)}
+  }
+  function refreshSticky(){
+    if(typeof document.querySelector!=='function')return;
+    const storage=document.querySelector('.status-panel');
+    const sticky=document.querySelector('.sticky-storage');
+    if(!storage||!sticky||typeof storage.getBoundingClientRect!=='function')return;
+    sticky.hidden=storage.getBoundingClientRect().bottom>0;
   }
   function paletteFor(tier){
     if(tier>=23)return ['#8a4b86','#e8a6d5','#fff2fb','#f4da82'];
@@ -338,11 +370,11 @@
   function renderShop(){
     if(gameLocked)return;
     if(activeTab==='buildings'){
-      let html=`<div class="settings-section"><label><input type="checkbox" id="auto-mining" ${state.autoMining?'checked':''}> オートマイニング（購入可能になった施設を1台購入・クリックなし）</label></div><div class="shop-title"><span>粘土生産施設</span><small>まとめ買い：${[1,10,100].map(n=>`<button class="small-button" data-bulk="${n}" style="padding:4px 6px;min-height:25px;${buyAmount===n?'background:#f4c88a':''}">×${n}</button>`).join(' ')}</small></div>`;
+      let html=`<div class="settings-section"><label><input type="checkbox" id="auto-mining" ${state.autoMining?'checked':''}> オートマイニング（施設と強化を自動購入・手動操作停止）</label></div><div class="shop-title"><span>粘土生産施設</span><small>まとめ買い：${[1,10,100].map(n=>`<button class="small-button" data-bulk="${n}" style="padding:4px 6px;min-height:25px;${buyAmount===n?'background:#f4c88a':''}">×${n}</button>`).join(' ')}</small></div>`;
       const visible=FACILITIES.filter((f,i)=>i<=2||state.buildings[i]>0||state.lifetime>=f.baseCost*.25||state.clay>=f.baseCost);
       html+=visible.map(f=>{
         const cost=costFor(f,buyAmount);const enough=state.clay>=cost;
-        return `<article class="building-row ${enough?'affordable':''}"><div class="pixel-small" aria-hidden="true">${safe(f.symbol)}</div><div class="building-info"><div class="building-name">${safe(f.name)}</div><div class="building-sub">${safe(f.desc)}<br>+${formatNumber(f.cps)} / 秒・台（基本値）</div><div class="building-price ${enough?'can':''}">費用 ${formatNumber(cost)} 粘土</div><span class="owned">所有 ${formatNumber(state.buildings[f.id])} 台</span></div><button class="build-button" data-buy="${f.id}" ${enough?'':'disabled'} aria-label="${safe(f.name)} を${buyAmount}台購入">×${buyAmount}<br>購入</button></article>`;
+        return `<article class="building-row ${enough?'affordable':''}"><div class="pixel-small" aria-hidden="true">${safe(f.symbol)}</div><div class="building-info"><div class="building-name">${safe(f.name)}</div><div class="building-sub">${safe(f.desc)}<br>+${formatNumber(f.cps)} / 秒・台（基本値）</div><div class="building-price ${enough?'can':''}">費用 ${formatNumber(cost)} 粘土</div><span class="owned">所有 ${formatNumber(state.buildings[f.id])} 台</span></div><button class="build-button" data-buy="${f.id}" ${enough&&!state.autoMining?'':'disabled'} aria-label="${safe(f.name)} を${buyAmount}台購入">×${buyAmount}<br>購入</button></article>`;
       }).join('');
       const next=FACILITIES.find(f=>!visible.includes(f));
       if(next)html+=`<div class="empty-state">次の設備は累計 ${formatNumber(next.baseCost*.25)} 粘土から表示されます</div>`;
@@ -352,7 +384,7 @@
       let html=`<div class="shop-title"><span>永久強化</span><small>購入済み ${state.upgrades.length} / ${UPGRADES.length}</small></div>`;
       html+=up.length?up.map(u=>{
         const enough=state.clay>=u.cost;
-        return `<article class="upgrade-row ${enough?'affordable':''}"><div class="pixel-small" aria-hidden="true">${u.symbol}</div><div class="upgrade-info"><div class="building-name">${safe(u.name)}</div><div class="building-sub">${safe(u.desc)}</div><div class="building-price ${enough?'can':''}">${formatNumber(u.cost)} 粘土</div></div><button class="upgrade-buy" data-upgrade="${safe(u.id)}" ${enough?'':'disabled'}>強化</button></article>`;
+        return `<article class="upgrade-row ${enough?'affordable':''}"><div class="pixel-small" aria-hidden="true">${u.symbol}</div><div class="upgrade-info"><div class="building-name">${safe(u.name)}</div><div class="building-sub">${safe(u.desc)}</div><div class="building-price ${enough?'can':''}">${formatNumber(u.cost)} 粘土</div></div><button class="upgrade-buy" data-upgrade="${safe(u.id)}" ${enough&&!state.autoMining?'':'disabled'}>強化</button></article>`;
       }).join(''):'<div class="empty-state">新しい強化は条件を達成すると解禁されます。<br>生産と施設購入を進めよう！</div>';
       el.panel.innerHTML=html;
     }else if(activeTab==='achievements'){
@@ -362,7 +394,7 @@
       el.panel.innerHTML=`<div class="shop-title"><span>ゲーム設定</span><small>ver ${VERSION}</small></div>
         <section class="settings-section"><h3>転生</h3><p>転生回数：${state.prestige} / 生産倍率：×${formatNumber(Math.pow(1.2,state.prestige))} / ボーナス粘土出現抽選確率：${(bonusChance()*100).toFixed(1)}%（毎分）</p><p>累計生産 1兆以上で転生可能。施設・強化・現在の粘土は初期化され、転生1回ごとに生産倍率×1.2、ボーナス出現率+0.5ポイント（最大20%）。</p><button class="danger-button" data-action="prestige" ${state.lifetime<1e12?'disabled':''}>転生する</button></section>
         <section class="settings-section"><h3>セーブとバックアップ</h3><p>セーブはこのゲーム専用の領域に保存されます。ほかのツールボックスデータや「文明の種」と混ざりません。10秒ごとの自動保存と予備セーブがあります。</p><div class="settings-buttons"><button class="small-button" data-action="save">今すぐセーブ</button><button class="small-button" data-action="export">JSONを書き出す</button><button class="small-button" data-action="import">JSONを読み込む</button></div></section>
-        <section class="settings-section"><h3>表示設定</h3><label><input type="checkbox" id="reduced-motion" ${state.reducedMotion?'checked':''}>タップ時の演出を軽量化</label></section>
+        <section class="settings-section"><h3>表示設定</h3><label for="number-format">数値表記</label><select id="number-format"><option value="full" ${state.numberFormat==='full'?'selected':''}>省略なし</option><option value="ja" ${state.numberFormat==='ja'?'selected':''}>日本式（万・億・兆）</option><option value="short" ${state.numberFormat==='short'?'selected':''}>英語式（k・M・B）</option></select><p>省略なしでも計算精度はJavaScriptの数値型に依存します。</p><label><input type="checkbox" id="reduced-motion" ${state.reducedMotion?'checked':''}>タップ時の演出を軽量化</label></section>
         <section class="settings-section"><h3>進行と仕様</h3><p>進化に必要な累計生産量は段階が進むほど加速的に増加。生産・購入ともに内部では「粘土換算」で一元管理され、表示される粘土が進化しても資源は分裂しません。ボーナス粘土は時間限定で出現します。放置生産は最大8時間、通常速度の25%です。</p></section>
         <section class="settings-section"><h3>セーブデータの初期化</h3><p>現在の進行を消して最初から始めます。実行前に確認が表示されます。</p><button class="danger-button" data-action="reset">進行を初期化</button></section>`;
     }
@@ -377,6 +409,9 @@
   }
   function autoMine(){
     if(!state.autoMining)return;
+    // 価格が安い解禁済み強化を先に買い、残高が残れば施設を1台購入する。
+    const upgrade=UPGRADES.filter(u=>unlockedUpgrade(u)&&!upgradeOwned(u.id)&&u.cost<=state.clay).sort((a,b)=>a.cost-b.cost)[0];
+    if(upgrade)purchaseUpgrade(upgrade.id,true);
     const affordable=FACILITIES.filter(f=>state.buildings[f.id]<1e7&&costFor(f,1)<=state.clay);
     affordable.sort((a,b)=>state.buildings[a.id]-state.buildings[b.id]||costFor(a,1)-costFor(b,1));
     if(affordable.length)purchaseFacility(affordable[0].id,true);
@@ -387,7 +422,7 @@
       {label:'キャンセル'},
       {label:'転生を実行',danger:true,action:()=>{
         const old=state;state=freshState();state.prestige=(old.prestige||0)+1;
-        state.achievements=old.achievements.slice();state.reducedMotion=old.reducedMotion;
+        state.achievements=old.achievements.slice();state.reducedMotion=old.reducedMotion;state.numberFormat=old.numberFormat;
         scheduleBonus();lastTier=-1;renderStats();setTab('buildings');save();showToast('転生しました！');
       }}
     ]);
@@ -413,7 +448,7 @@
       {label:'キャンセル'},
       {label:'初期化する',danger:true,action:()=>{
         try{localStorage.removeItem(SAVE_KEY);localStorage.removeItem(BACKUP_KEY)}catch{};
-        state=freshState();lastTier=-1;renderStats();renderShop();save();showToast('ゲームを初期化しました。');
+        state=freshState();lastTier=-1;lastToolCount=-1;renderStats();renderShop();save();showToast('ゲームを初期化しました。');
       }}
     ]);
   }
@@ -482,7 +517,10 @@
     if(status==='corrupt'){showCorruptScreen()}
     else{lastTier=-1;awardAchievements(true);renderStats();renderShop();if(status==='new')save();if(status==='volatile')markDirty()}
     el.clayButton.addEventListener('click',tap);
-    el.bonus.addEventListener('click',claimBonus);
+    el.bonus.addEventListener('click',()=>{if(!state.autoMining)claimBonus()});
+    window.addEventListener('scroll',refreshSticky,{passive:true});
+    window.addEventListener('resize',refreshSticky);
+    refreshSticky();
     document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>setTab(t.dataset.tab)));
     el.panel.addEventListener('click',event=>{
       const target=event.target.closest('button');if(!target||target.disabled)return;
@@ -497,7 +535,8 @@
     });
     el.panel.addEventListener('change',event=>{
       if(event.target.id==='reduced-motion'){state.reducedMotion=event.target.checked;markDirty()}
-      if(event.target.id==='auto-mining'){state.autoMining=event.target.checked;markDirty()}
+      if(event.target.id==='auto-mining'){state.autoMining=event.target.checked;renderStats();renderShop();markDirty()}
+      if(event.target.id==='number-format'){state.numberFormat=event.target.value;lastToolCount=-1;renderStats();renderShop();markDirty()}
     });
     el.file.addEventListener('change',event=>importSave(event.target.files?.[0]));
     document.addEventListener('visibilitychange',()=>{if(document.hidden)save();else lastFrame=Math.min(lastFrame,now())});

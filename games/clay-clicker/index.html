@@ -17,7 +17,7 @@
       <div class="top-actions"><span id="save-status" class="save-status">● オートセーブ</span><a class="home-link" id="home-link" href="../../index.html" hidden>⌂ ホームへ戻る</a></div>
     </header>
 
-    <div class="sticky-storage" aria-label="現在の保有粘土">保有粘土 <strong id="sticky-amount">0</strong></div>
+    <div class="sticky-storage" hidden aria-label="現在の保有粘土">保有粘土 <strong id="sticky-amount">0</strong></div>
     <main class="game-grid">
       <section class="play-column" aria-label="粘土生産エリア">
         <section class="panel status-panel">
@@ -35,14 +35,14 @@
         <section class="pixel-stage" id="pixel-stage">
           <div class="scene-stars" aria-hidden="true"></div>
           <div class="pixel-stage-label"><span class="on-air"></span> CLAY LAB / EXPERIMENT 001</div>
-          <div class="click-zone" id="click-zone">
+          <div class="click-zone" id="click-zone"><div id="auto-tools" class="auto-tools" aria-hidden="true"></div><div id="auto-overlay" class="auto-overlay" hidden>⛏ オートマイニング中<br><small>自動購入モード・手動操作停止</small></div>
             <div class="clay-aura" aria-hidden="true"></div>
             <button id="clay-button" class="clay-button" aria-label="粘土を生産する">
               <canvas id="clay-sprite" width="24" height="24" aria-hidden="true"></canvas>
             </button>
             <div id="particles" class="particles" aria-hidden="true"></div>
           </div>
-          <div class="scene-instruction">TAP TO MAKE CLAY! <span>▲</span></div>
+          <div class="scene-instruction">TAP TO MINE CLAY! <span>▲</span></div>
           <button id="bonus-clay" class="bonus-clay" hidden>✦ <span>ボーナス粘土出現！</span></button>
           <div id="boost-banner" class="boost-banner" hidden>✦ フィーバー ×7 — <span id="boost-timer">30</span>s</div>
         </section>
@@ -50,7 +50,7 @@
         <section class="panel tier-panel">
           <div class="tier-panel-header"><span>◆ 次の粘土へ進化</span><span id="tier-progress-label">0%</span></div>
           <div class="progress-track" role="progressbar" id="tier-progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="tier-progress-fill" class="progress-fill"></div></div>
-          <div class="tier-panel-footer"><span id="next-tier">圧縮粘土</span><span id="next-target">累計 9 で解禁</span></div>
+          <div class="tier-lifetime">累計生産 <strong id="tier-lifetime">0</strong></div><div class="tier-panel-footer"><span id="next-tier">圧縮粘土</span><span id="next-target">累計 9 で解禁</span></div>
         </section>
         <div class="footer-hint">1種類の資源が進化する。別素材への交換は不要。</div>
       </section>
@@ -65,7 +65,7 @@
         <div id="panel-content" class="panel-content"></div>
       </section>
     </main>
-    <footer class="game-footer">CLAY CLICKER — BUILD / EVOLVE / TRANSCEND <span id="version-label">v0.2.0</span></footer>
+    <footer class="game-footer">CLAY CLICKER — BUILD / EVOLVE / TRANSCEND <span id="version-label">v0.3.0</span></footer>
   </div>
   <div id="toast" role="status" aria-live="polite" class="toast" hidden></div>
   <div id="modal-shade" class="modal-shade" hidden><div class="modal panel" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h2 id="modal-title"></h2><div id="modal-body"></div><div id="modal-actions" class="modal-actions"></div></div></div>
