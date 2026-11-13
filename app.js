@@ -1,5 +1,5 @@
 /**
- * My Toolbox v1.1.4
+ * My Toolbox v1.1.5
  * Created: 2026-11-09
  * Author: Personal project / ChatGPT (prototype)
  * Zero-dependency PWA. Text data stays in localStorage; photos use IndexedDB. Backups include both.
@@ -17,6 +17,14 @@
   const CIVILIZATION_URL = './game-player.html?game=civilization';
   const civilizationEntry = () => ({
     id:CIVILIZATION_ID,name:'文明の種',url:CIVILIZATION_URL,
+    icon:'🎮',iconKey:'game',iconImage:'',kind:'game',
+    category:'内蔵ゲーム',folder:'',favorite:false,browser:'system'
+  });
+  // A second self-contained game; its files and save keys are not owned by Toolbox.
+  const CLAY_ID = 'builtin-clay-clicker-v1';
+  const CLAY_URL = './games/clay-clicker/index.html?toolbox=1';
+  const clayEntry = () => ({
+    id:CLAY_ID,name:'粘土クリッカー',url:CLAY_URL,
     icon:'🎮',iconKey:'game',iconImage:'',kind:'game',
     category:'内蔵ゲーム',folder:'',favorite:false,browser:'system'
   });
@@ -143,6 +151,7 @@
       version:7,
       links:[
         civilizationEntry(),
+        clayEntry(),
         {id:uid(),name:'Google',url:'https://www.google.com/',icon:'🌐',iconKey:'globe',kind:'web',category:'検索',favorite:true},
         {id:uid(),name:'YouTube',url:'https://www.youtube.com/',icon:'▶️',iconKey:'play',kind:'web',category:'動画',favorite:true},
         {id:uid(),name:'ChatGPT',url:'https://chatgpt.com/',icon:'✳️',iconKey:'grid',kind:'web',category:'ツール',favorite:true},
@@ -162,7 +171,7 @@
       cube:{stickers:solvedCube(),history:[],moveCount:0},
       habits:{items:[{id:uid(),title:'',done:false},{id:uid(),title:'',done:false},{id:uid(),title:'',done:false}],day:'',history:{}},
       notes:[{id:uid(),title:'ここから始めよう',body:'このメモはサンプルです。\n\n「＋」ボタンから、思いついたアイデアを書き留めてみましょう。リンクやリストも自由に追加できます。',updatedAt:TODAY}],
-      prefs:{appName:'My Toolbox',appIconKey:'grid',appIconImage:'',theme:'light',onboard:true,defaultBrowser:'safari',searchBrowser:'safari',searchEngine:'google',homeSections:[],hiddenSections:[],photoAlbums:[],civilizationAdded:true}
+      prefs:{appName:'My Toolbox',appIconKey:'grid',appIconImage:'',theme:'light',onboard:true,defaultBrowser:'safari',searchBrowser:'safari',searchEngine:'google',homeSections:[],hiddenSections:[],photoAlbums:[],civilizationAdded:true,clayAdded:true}
     };
   }
   const BROWSERS=[['system','端末の既定'],['safari','Safari（試験的）'],['chrome','Chrome'],['firefox','Firefox'],['edge','Edge']];
@@ -176,6 +185,11 @@
     // A previously deleted bundled entry must remain deleted after subsequent loads.
     const civilizationAdded=!!raw.prefs?.civilizationAdded || links.some(x=>x.id===CIVILIZATION_ID);
     if(!civilizationAdded)links.push(civilizationEntry());
+    // One-time migration: add Clay Clicker to old installs, never duplicate an
+    // existing manual registration, and respect subsequent user deletion.
+    const clayAlreadyListed=links.some(x=>x.id===CLAY_ID || /(?:^|\/)games\/clay-clicker\/index\.html(?:\?toolbox=1)?$/.test(x.url));
+    const clayAdded=!!raw.prefs?.clayAdded || clayAlreadyListed;
+    if(!clayAdded)links.push(clayEntry());
     const lists=raw.lists.slice(0,300).map(x=>({id:String(x.id||uid()),name:String(x.name||'リスト').slice(0,120),icon:String(x.icon||'📋').slice(0,8),iconKey:legacyIcon(x.iconKey||x.icon,'list'),builtin:x.id==='tasks',items:Array.isArray(x.items)?x.items.slice(0,10000).map(item=>({id:String(item.id||uid()),title:String(item.title||'').slice(0,500),done:!!item.done,category:item.category==='shopping'?'shopping':'todo',due:isDateKey(item.due)?item.due:'',repeatAnchor:isDateKey(item.repeatAnchor)?item.repeatAnchor:(isDateKey(item.due)?item.due:''),repeat:['none','daily','weekly','monthly','3days'].includes(item.repeat)?item.repeat:'none',completedDates:Array.isArray(item.completedDates)?item.completedDates.filter(isDateKey).slice(-500):[]})):[]}));
     // Migrate v0.1–v0.4's two built-in lists into one, without dropping entries.
     // Distinct category tags retain each item's original TODO/shopping meaning.
@@ -219,7 +233,7 @@
     const history=Object.fromEntries(Object.entries(habitRaw.history&&typeof habitRaw.history==='object'?habitRaw.history:{}).filter(([day])=>isDateKey(day)).slice(-500).map(([day,entry])=>[day,{items:Array.isArray(entry?.items)?entry.items.slice(0,3).map(x=>({title:String(x.title||'').slice(0,100),done:!!x.done})):[]} ]));
     const habits={items:Array.from({length:3},(_,i)=>({id:String(habitRaw.items?.[i]?.id||uid()),title:String(habitRaw.items?.[i]?.title||'').slice(0,100),done:!!habitRaw.items?.[i]?.done})),day:isDateKey(habitRaw.day)?habitRaw.day:'',history};
     if(habits.day&&!history[habits.day])history[habits.day]={items:habits.items.map(x=>({title:x.title,done:x.done}))};
-    return {version:7,links,lists:retainedLists,notes,events,habits,timetable,cube,prefs:{appName:String(raw.prefs?.appName||'My Toolbox').slice(0,32),appIconKey:legacyIcon(raw.prefs?.appIconKey||'grid','grid'),appIconImage:imageDataOk(raw.prefs?.appIconImage)?raw.prefs.appIconImage:'',theme:['light','dark','system'].includes(raw.prefs?.theme)?raw.prefs.theme:'light',onboard:!!raw.prefs?.onboard,toolOrder:Array.isArray(raw.prefs?.toolOrder)?raw.prefs.toolOrder.filter(x=>typeof x==='string'):[],linkOrder:Array.isArray(raw.prefs?.linkOrder)?raw.prefs.linkOrder.filter(x=>typeof x==='string'):[],bottomNav:Array.isArray(raw.prefs?.bottomNav)?raw.prefs.bottomNav.filter(x=>typeof x==='string'):[],folders:{web:Array.isArray(raw.prefs?.folders?.web)?raw.prefs.folders.web.filter(x=>typeof x==='string'):[],app:Array.isArray(raw.prefs?.folders?.app)?raw.prefs.folders.app.filter(x=>typeof x==='string'):[],game:Array.isArray(raw.prefs?.folders?.game)?raw.prefs.folders.game.filter(x=>typeof x==='string'):[]},photoAlbums:Array.isArray(raw.prefs?.photoAlbums)?raw.prefs.photoAlbums.filter(x=>typeof x==='string').slice(0,200):[],defaultBrowser:validBrowser(raw.prefs?.defaultBrowser,'safari'),searchBrowser:validBrowser(raw.prefs?.searchBrowser,'safari'),searchEngine:['google','duckduckgo','bing'].includes(raw.prefs?.searchEngine)?raw.prefs.searchEngine:'google',homeSections:Array.isArray(raw.prefs?.homeSections)?raw.prefs.homeSections.filter(x=>typeof x==='string'):[],hiddenSections:Array.isArray(raw.prefs?.hiddenSections)?raw.prefs.hiddenSections.filter(x=>typeof x==='string'):[],civilizationAdded:true}};
+    return {version:7,links,lists:retainedLists,notes,events,habits,timetable,cube,prefs:{appName:String(raw.prefs?.appName||'My Toolbox').slice(0,32),appIconKey:legacyIcon(raw.prefs?.appIconKey||'grid','grid'),appIconImage:imageDataOk(raw.prefs?.appIconImage)?raw.prefs.appIconImage:'',theme:['light','dark','system'].includes(raw.prefs?.theme)?raw.prefs.theme:'light',onboard:!!raw.prefs?.onboard,toolOrder:Array.isArray(raw.prefs?.toolOrder)?raw.prefs.toolOrder.filter(x=>typeof x==='string'):[],linkOrder:Array.isArray(raw.prefs?.linkOrder)?raw.prefs.linkOrder.filter(x=>typeof x==='string'):[],bottomNav:Array.isArray(raw.prefs?.bottomNav)?raw.prefs.bottomNav.filter(x=>typeof x==='string'):[],folders:{web:Array.isArray(raw.prefs?.folders?.web)?raw.prefs.folders.web.filter(x=>typeof x==='string'):[],app:Array.isArray(raw.prefs?.folders?.app)?raw.prefs.folders.app.filter(x=>typeof x==='string'):[],game:Array.isArray(raw.prefs?.folders?.game)?raw.prefs.folders.game.filter(x=>typeof x==='string'):[]},photoAlbums:Array.isArray(raw.prefs?.photoAlbums)?raw.prefs.photoAlbums.filter(x=>typeof x==='string').slice(0,200):[],defaultBrowser:validBrowser(raw.prefs?.defaultBrowser,'safari'),searchBrowser:validBrowser(raw.prefs?.searchBrowser,'safari'),searchEngine:['google','duckduckgo','bing'].includes(raw.prefs?.searchEngine)?raw.prefs.searchEngine:'google',homeSections:Array.isArray(raw.prefs?.homeSections)?raw.prefs.homeSections.filter(x=>typeof x==='string'):[],hiddenSections:Array.isArray(raw.prefs?.hiddenSections)?raw.prefs.hiddenSections.filter(x=>typeof x==='string'):[],civilizationAdded:true,clayAdded:true}};
   }
   let state;
   let storageAvailable=true;
@@ -301,6 +315,17 @@
   let toastTimer;
   function showToast(message){const node=$('#toast');node.textContent=message;node.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('visible'),2300);}
   const iconTile=(icon,color='purple',data='')=>tile(icon,color,data);
+  function launcherIcon(link,color='blue'){
+    if(!imageDataOk(link.iconImage)){
+      const src=link.id===CIVILIZATION_ID?'./games/civilization/icon-192.png':
+        link.id===CLAY_ID?'./games/clay-clicker/icon.svg':null;
+      if(src)return `<span class="icon-tile tile-${color}"><img src="${src}" alt="" class="custom-link-icon"></span>`;
+    }
+    return iconTile(link.iconKey||link.icon,color,link.iconImage);
+  }
+  const builtinGameLabel=link=>
+    (link.id===CIVILIZATION_ID&&link.url===CIVILIZATION_URL)||
+    (link.id===CLAY_ID&&link.url===CLAY_URL);
   const pageHeading=(title,desc)=>`<div class="topbar"><div><p class="kicker"><span class="brand-icon-mini" aria-hidden="true">${imageDataOk(state.prefs.appIconImage)?`<img src="${state.prefs.appIconImage}" alt="">`:svgIcon(state.prefs.appIconKey||'grid')}</span>${esc(state.prefs.appName||'My Toolbox')} · 1.1.4</p><h1>${esc(title)}</h1></div><div class="header-actions"><button type="button" class="circle-button menu-trigger" data-action="toggle-drawer" aria-label="クイックメニューを開く" aria-haspopup="dialog" aria-expanded="${ui.drawerOpen}">☰</button></div></div>${desc?`<p class="page-intro">${esc(desc)}</p>`:''}`;
   const empty=(icon,message)=>`<div class="empty"><div class="empty-icon">${icon}</div>${message}</div>`;
   const listStats = id => {const list=getList(id);return list?counts(list.items):{done:0,total:0};};
@@ -360,7 +385,7 @@
       search:`<section class="home-web"><form data-form="web-search" class="web-search-form"><span aria-hidden="true">${svgIcon('search')}</span><input class="field" name="query" enterkeyhint="search" autocomplete="off" placeholder="Webで検索" aria-label="Web検索のキーワード" required><button class="primary-btn" type="submit">検索</button></form><button type="button" class="tiny-link" data-action="go" data-page="search">${svgIcon('search')} 保存した項目を探す ›</button></section>`,
       habits:habitCard(),
       tools:`<div class="section-heading"><h2>ツールボックス</h2><button class="tiny-link" data-action="reorder-tools">並べ替え</button></div><div class="tool-grid">${orderedTools.map(t=>`<button type="button" class="tool-card" data-action="go" data-page="${t.id}" ${t.listId?`data-list="${t.listId}"`:''}><span class="tool-icon tile-${t.color}" aria-hidden="true">${svgIcon(t.icon)}</span><div><div class="tool-name">${t.name}</div><div class="tool-description">${t.desc}</div></div></button>`).join('')}</div>`,
-      favorites:`<div class="section-heading"><h2>お気に入り</h2><span class="favorite-nav"><button class="tiny-link" data-action="go" data-page="links">リンク ›</button><button class="tiny-link" data-action="go" data-page="apps">アプリ ›</button></span></div>${favorites.length?`<div class="quick-links">${favorites.map(x=>`<button type="button" class="quick-card" data-link-id="${esc(x.id)}" data-action="open-link" data-id="${esc(x.id)}">${x.id===CIVILIZATION_ID&&!imageDataOk(x.iconImage)?`<span class="icon-tile tile-gray"><img src="./games/civilization/icon-192.png" alt="" class="custom-link-icon"></span>`:iconTile(x.iconKey||x.icon,'gray',x.iconImage)}<span style="min-width:0"><div class="name">${esc(x.name)}</div><div class="meta">${esc(x.id===CIVILIZATION_ID&&x.url===CIVILIZATION_URL?'内蔵ゲーム':urlLabel(x.url))}</div></span></button>`).join('')}</div>`:empty(svgIcon('bookmark'),'リンク・アプリの登録画面でお気に入りを設定できます。')}`,
+      favorites:`<div class="section-heading"><h2>お気に入り</h2><span class="favorite-nav"><button class="tiny-link" data-action="go" data-page="links">リンク ›</button><button class="tiny-link" data-action="go" data-page="apps">アプリ ›</button></span></div>${favorites.length?`<div class="quick-links">${favorites.map(x=>`<button type="button" class="quick-card" data-link-id="${esc(x.id)}" data-action="open-link" data-id="${esc(x.id)}">${launcherIcon(x,'gray')}<span style="min-width:0"><div class="name">${esc(x.name)}</div><div class="meta">${esc(builtinGameLabel(x)?'内蔵ゲーム':urlLabel(x.url))}</div></span></button>`).join('')}</div>`:empty(svgIcon('bookmark'),'リンク・アプリの登録画面でお気に入りを設定できます。')}`,
       recent:`<div class="section-heading"><h2>最近のメモ</h2><button class="tiny-link" data-action="go" data-page="notes">一覧を見る ›</button></div>${recent?`<button type="button" class="note-peek" data-action="edit-note" data-id="${esc(recent.id)}"><div class="note-title">${esc(recent.title)}</div><div class="note-body">${esc(recent.body||'本文なし')}</div></button>`:empty(svgIcon('note'),'まだメモがありません。')}`
     };
     const order=HOME_SECTIONS.map(x=>x[0]).sort((a,b)=>{const prefs=state.prefs.homeSections||[];return (prefs.indexOf(a)<0?999:prefs.indexOf(a))-(prefs.indexOf(b)<0?999:prefs.indexOf(b));});
@@ -555,13 +580,15 @@
         .replace(/(rel="icon"[^>]*href="[^"?]+)(?:\?[^"]*)?("[^>]*>)/,(_,a,b)=>a+'?brand='+stamp+b);
       manifest.icons=manifest.icons.map(icon=>({...icon,src:icon.src.replace(/\?.*$/,'')+'?brand='+stamp}));
       // A different cache name forces the existing service worker to refresh static icon assets.
-      texts[3]=texts[3].replace(/(const CACHE_VERSION = ')[^']+(';)/,(_,a,b)=>a+`v1.1.4-github-pages-brand-${stamp}`+b);
+      texts[3]=texts[3].replace(/(const CACHE_VERSION = ')[^']+(';)/,(_,a,b)=>a+`v1.1.5-github-pages-brand-${stamp}`+b);
       const encode=new TextEncoder(),entries=files.map((name,i)=>[name,encode.encode(texts[i])]);
       entries.push(['manifest.webmanifest',encode.encode(JSON.stringify(manifest,null,2))]);
       entries.push(['.nojekyll',new Uint8Array(0)]);
       // Do not lose the integrated game when exporting a custom-icon website ZIP.
       // Copy the CURRENT published files, so game updates remain independently replaceable.
-      const bundledText=['recovery.html','SAFE_GAME_FIX.md','INTEGRATION_GUIDE.md','game-player.html','games/civilization/index.html','games/civilization/game.js','games/civilization/style.css','games/civilization/manifest.webmanifest','games/civilization/README.md'];
+      const bundledText=['recovery.html','SAFE_GAME_FIX.md','INTEGRATION_GUIDE.md','game-player.html','games/civilization/index.html','games/civilization/game.js','games/civilization/style.css','games/civilization/manifest.webmanifest','games/civilization/README.md',
+        'games/clay-clicker/index.html','games/clay-clicker/game.js','games/clay-clicker/style.css',
+        'games/clay-clicker/icon.svg'];
       const bundledImages=['games/civilization/icon-180.png','games/civilization/icon-192.png','games/civilization/icon-512.png'];
       for(const path of bundledText){const response=await fetch('./'+path,{cache:'no-store'});if(!response.ok)throw Error(path+'の取得に失敗');entries.push([path,encode.encode(await response.text())]);}
       for(const path of bundledImages){const response=await fetch('./'+path,{cache:'no-store'});if(!response.ok)throw Error(path+'の取得に失敗');entries.push([path,new Uint8Array(await response.arrayBuffer())]);}
@@ -592,7 +619,7 @@
     <div class="folder-strip"><button class="folder-chip ${currentFolder==='__all__'?'selected':''}" data-action="select-folder" data-kind="${kind}" data-folder="__all__">すべて</button>${folders.map(f=>`<button class="folder-chip ${currentFolder===f?'selected':''}" data-action="select-folder" data-kind="${kind}" data-folder="${esc(f)}">${svgIcon('folder')} ${esc(f)}</button>`).join('')}<button class="folder-chip" data-action="new-folder" data-kind="${kind}">＋ フォルダ</button><button class="folder-chip ${currentFolder==='__uncategorized__'?'selected':''}" data-action="select-folder" data-kind="${kind}" data-folder="__uncategorized__">未分類</button></div>
     <p class="folder-hint">「すべて」は全項目、「未分類」はフォルダ未設定の項目を表示します。</p><button class="tiny-link" data-action="reorder-links" data-kind="${kind}" data-folder="${esc(currentFolder)}">順序変更</button>
     ${filtered.length?`<div class="link-list">${filtered.map(link=>`<div class="link-card" data-link-id="${esc(link.id)}">
-      <button type="button" class="link-open" data-action="open-link" data-id="${esc(link.id)}">${link.id===CIVILIZATION_ID&&!imageDataOk(link.iconImage)?`<span class="icon-tile tile-blue"><img src="./games/civilization/icon-192.png" alt="" class="custom-link-icon"></span>`:iconTile(link.iconKey||link.icon,kind==='web'?'purple':'blue',link.iconImage)}<span style="min-width:0;width:100%"><div class="card-name">${esc(link.name)}</div><div class="card-url">${esc(link.id===CIVILIZATION_ID&&link.url===CIVILIZATION_URL?'内蔵ゲーム · オフライン対応':urlLabel(link.url))}</div></span></button>
+      <button type="button" class="link-open" data-action="open-link" data-id="${esc(link.id)}">${launcherIcon(link,kind==='web'?'purple':'blue')}<span style="min-width:0;width:100%"><div class="card-name">${esc(link.name)}</div><div class="card-url">${esc(builtinGameLabel(link)?'内蔵ゲーム · オフライン対応':urlLabel(link.url))}</div></span></button>
       <div class="link-actions"><button type="button" data-action="favorite-link" data-id="${esc(link.id)}" aria-label="お気に入り切替" class="${link.favorite?'favorite':''}">${link.favorite?'★ お気に入り':'☆ お気に入り'}</button><button type="button" data-action="edit-link" data-id="${esc(link.id)}">編集 ›</button></div>
     </div>`).join('')}</div>`:empty(svgIcon(kind==='game'?'game':'search'),'このフォルダには登録がありません。＋ から追加できます。')}`;
   }
@@ -759,7 +786,7 @@
       <div class="setting-row"><div><b>データ救出（読み取り専用）</b><small>消えたように見える保存データを確認・書き出し</small></div><a href="./recovery.html" class="secondary-btn" style="text-decoration:none">開く</a></div>
       <div class="setting-row"><div><b>デモデータに初期化</b><small>写真も含めて全削除します</small></div><button class="danger-btn" data-action="reset">初期化</button></div>
     </div></section>
-    <section class="settings-group"><p class="settings-title">このアプリについて</p><div class="card"><div class="setting-row"><div><b>My Toolbox v1.1.4</b><small>HTML / CSS / JavaScript / Service Worker<br>無料で動作する個人用PWAの試作品</small></div></div><div class="setting-row"><div><b>カレンダーとGoogle連携</b><small>予定は端末に保存。Googleへの転記は登録画面から手動で確定します。Google側の予定取得・双方向同期はありません。</small></div></div><div class="setting-row"><div><b>データの保存先</b><small>予定やメモはlocalStorage、写真はIndexedDBに保存。クラウド同期はありません。</small></div></div><div class="setting-row"><div><b>アプリ・ゲームへのリンク</b><small>Universal Linkや公式のアプリURLが必要です。OSやアプリ側の制限で開けない場合があります。</small></div></div><div class="setting-row"><div><b>機能の追加</b><small>「マイリスト」ではリストを自由に増やせます。新しい種類のツールはコード追加で拡張できます。</small></div></div></div></section>
+    <section class="settings-group"><p class="settings-title">このアプリについて</p><div class="card"><div class="setting-row"><div><b>My Toolbox v1.1.5</b><small>HTML / CSS / JavaScript / Service Worker<br>無料で動作する個人用PWAの試作品</small></div></div><div class="setting-row"><div><b>カレンダーとGoogle連携</b><small>予定は端末に保存。Googleへの転記は登録画面から手動で確定します。Google側の予定取得・双方向同期はありません。</small></div></div><div class="setting-row"><div><b>データの保存先</b><small>予定やメモはlocalStorage、写真はIndexedDBに保存。クラウド同期はありません。</small></div></div><div class="setting-row"><div><b>アプリ・ゲームへのリンク</b><small>Universal Linkや公式のアプリURLが必要です。OSやアプリ側の制限で開けない場合があります。</small></div></div><div class="setting-row"><div><b>機能の追加</b><small>「マイリスト」ではリストを自由に増やせます。新しい種類のツールはコード追加で拡張できます。</small></div></div></div></section>
     <div class="feature-tip"><span>${svgIcon('bookmark')}</span><p>ログインやサーバーへのデータ送信機能はありません。Web公開した場合も、メモの内容が自動で公開されるわけではありません。ただしブラウザデータの消去に備え、バックアップを取ってください。</p></div>
     <input type="file" id="import-file" accept=".json,application/json" hidden>`;
   }
@@ -1024,10 +1051,11 @@
   }
   function openLink(id){
     const link=state.links.find(x=>x.id===id);if(!link)return;
-    if(link.id===CIVILIZATION_ID && link.url===CIVILIZATION_URL){
+    if((link.id===CIVILIZATION_ID && link.url===CIVILIZATION_URL) ||
+       (link.id===CLAY_ID && link.url===CLAY_URL)){
       // Same-scope navigation keeps the game in the installed PWA.
       // It does not use the external browser setting or the toolbox gesture handler.
-      window.location.assign(new URL(CIVILIZATION_URL,document.baseURI).href);
+      window.location.assign(new URL(link.url,document.baseURI).href);
       return;
     }
     const url=normalizedUrl(link.url);if(!url){showToast('このURLは開けません。');return;}

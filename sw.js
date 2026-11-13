@@ -2,7 +2,7 @@
  * Limit cache and cleanup to THIS site's path. github.io hosts many repositories
  * under one origin, so deleting all origin caches would harm unrelated apps.
  */
-const CACHE_VERSION = 'v1.1.5-civilization-0.7.0';
+const CACHE_VERSION = 'v1.1.5-github-pages-clay-clicker-1';
 const SCOPE_URL = new URL(self.registration.scope);
 const CACHE_PREFIX = `my-toolbox:${encodeURIComponent(SCOPE_URL.pathname)}:`;
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
@@ -12,10 +12,13 @@ const ASSETS = [
   './game-player.html', './recovery.html',
   './games/civilization/index.html', './games/civilization/style.css', './games/civilization/game.js',
   './games/civilization/manifest.webmanifest',
-  './games/civilization/icon-180.png', './games/civilization/icon-192.png', './games/civilization/icon-512.png'
+  './games/civilization/icon-180.png', './games/civilization/icon-192.png', './games/civilization/icon-512.png',
+  './games/clay-clicker/index.html', './games/clay-clicker/style.css',
+  './games/clay-clicker/game.js', './games/clay-clicker/icon.svg'
 ];
 const SHELL_URLS = new Set(ASSETS.map(path => new URL(path, SCOPE_URL).href));
-const GAME_DIR = new URL('./games/civilization/', SCOPE_URL).pathname;
+const GAME_DIRS = ['./games/civilization/', './games/clay-clicker/']
+  .map(path => new URL(path, SCOPE_URL).pathname);
 const HOME_URL = new URL('./', SCOPE_URL).href;
 const INDEX_URL = new URL('./index.html', SCOPE_URL).href;
 
@@ -45,7 +48,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== SCOPE_URL.origin || !url.pathname.startsWith(SCOPE_URL.pathname)) return;
   const cleanURL = new URL(url.pathname, url.origin).href;
   // Future game assets added under this folder are cached on their first online request.
-  if (!SHELL_URLS.has(cleanURL) && !url.pathname.startsWith(GAME_DIR)) return;
+  if (!SHELL_URLS.has(cleanURL) && !GAME_DIRS.some(dir => url.pathname.startsWith(dir))) return;
 
   event.respondWith((async () => {
     try {
