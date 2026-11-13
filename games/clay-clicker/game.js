@@ -1,13 +1,13 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.6.0 (2026-11-13)
+ * Version: 0.7.0 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.6.0';
+  const VERSION = '0.7.0';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const OFFLINE_MIN_MS = 5000; // Short interruptions are not reported
@@ -446,14 +446,34 @@
       state.bonusAt=t+60000;markDirty();
     }
   }
+  // Compare marginal production per clay, allowing a bounded wait for better purchases.
   function autoMine(){
     if(!state.autoMining)return;
-    // 価格が安い解禁済み強化を先に買い、残高が残れば施設を1台購入する。
-    const upgrade=UPGRADES.filter(u=>unlockedUpgrade(u)&&!upgradeOwned(u.id)&&u.cost<=state.clay).sort((a,b)=>a.cost-b.cost)[0];
-    if(upgrade)purchaseUpgrade(upgrade.id,true);
-    const affordable=FACILITIES.filter(f=>state.buildings[f.id]<1e7&&costFor(f,1)<=state.clay);
-    affordable.sort((a,b)=>state.buildings[a.id]-state.buildings[b.id]||costFor(a,1)-costFor(b,1));
-    if(affordable.length)purchaseFacility(affordable[0].id,true);
+    const cps=getCps(), horizon=120, candidates=[];
+    function evaluate(cost,apply,kind,id){
+      if(!Number.isFinite(cost)||cost<=0)return;
+      const wait=cost<=state.clay?0:(cps>0?(cost-state.clay)/cps:Infinity);
+      if(wait>horizon)return;
+      const hypothetical={...state,buildings:state.buildings.slice(),upgrades:state.upgrades.slice()};
+      apply(hypothetical);
+      const delta=getCpsAt(hypothetical,now())-cps;
+      if(!Number.isFinite(delta)||delta<=0)return;
+      const score=(delta/cost)*Math.pow(1-wait/(horizon+1),2);
+      candidates.push({kind,id,cost,wait,score});
+    }
+    for(const f of FACILITIES){
+      if(state.buildings[f.id]>=1e7)continue;
+      evaluate(costFor(f,1),s=>s.buildings[f.id]++,'facility',f.id);
+    }
+    for(const u of UPGRADES){
+      if(upgradeOwned(u.id)||!unlockedUpgrade(u))continue;
+      evaluate(u.cost,s=>s.upgrades.push(u.id),'upgrade',u.id);
+    }
+    candidates.sort((a,b)=>b.score-a.score||a.wait-b.wait||a.cost-b.cost);
+    const best=candidates[0];
+    if(!best||best.wait>0||state.clay<best.cost)return;
+    if(best.kind==='facility')purchaseFacility(best.id,true);
+    else purchaseUpgrade(best.id,true);
   }
   function prestige(){
     if(state.clay<PRESTIGE_MIN)return;
