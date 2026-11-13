@@ -1,16 +1,16 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.5.0 (2026-11-13)
+ * Version: 0.6.0 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.5.0';
+  const VERSION = '0.6.0';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
-  const MAX_OFFLINE_MS = 8 * 60 * 60 * 1000;
+  const OFFLINE_MIN_MS = 5000; // Short interruptions are not reported
   const RATIO = 9;
 
   const TIER_NAMES = [
@@ -102,6 +102,8 @@
   let lastAutosave = 0;
   let toastTimer = null;
   let lastTier = 0;
+  let suspended = false;
+  let pendingOfflineReport = null;
 
   const AUTO_CLICK_ID = FACILITIES.length-1;
   const PRESTIGE_MIN=1e9;
@@ -175,19 +177,49 @@
     if(parsedMain||parsedBack){
       state=parsedMain||parsedBack;
       if(!parsedMain)showToast('予備セーブから復旧しました。');
-      const age=Math.max(0,Math.min(MAX_OFFLINE_MS,now()-state.lastSaved));
-      if(age>5000){
-        const income=getCpsAt(state,Math.max(now(),state.boostUntil+1))*age/1000*.25;
-        if(Number.isFinite(income)){
-          state.clay+=income;state.lifetime+=income;
-          const mins=Math.floor(age/60000);
-          if(income>0)queueMicrotask(()=>showToast(`オフライン生産：+${formatNumber(income)} 粘土換算（約${mins}分）`));
-        }
-      }
+      // The persisted timestamp is the single source of truth for closed-page absence.
+      // Apply it exactly once before normal ticks resume.
+      pendingOfflineReport=applyOfflineProduction(state.lastSaved);
       state.lastSaved=now();
       return parsedMain?'loaded':'recovered';
     }
     return 'corrupt';
+  }
+  function applyOfflineProduction(since){
+    const end=now();
+    const age=Math.max(0,end-since);
+    if(age<OFFLINE_MIN_MS)return null;
+    // No background timers or automatic purchases: only the existing passive CPS.
+    // Temporary boost is integrated only until its actual expiration.
+    const boostedMs=Math.max(0,Math.min(age,state.boostUntil-since));
+    const normalMs=age-boostedMs;
+    const baseCps=getCpsAt(state,Math.max(end,state.boostUntil+1));
+    const income=baseCps*(normalMs+7*boostedMs)/1000;
+    if(!Number.isFinite(income)||income<0||!Number.isFinite(state.clay+income)||!Number.isFinite(state.lifetime+income))return null;
+    if(income>0){state.clay+=income;state.lifetime+=income;awardAchievements(true);}
+    return {age,income};
+  }
+  function offlineDuration(ms){
+    const total=Math.floor(ms/1000),hours=Math.floor(total/3600),mins=Math.floor(total%3600/60),secs=total%60;
+    return hours?`${hours}時間${mins}分`:mins?`${mins}分${secs}秒`:`${secs}秒`;
+  }
+  function reportOffline(result){
+    if(!result)return;
+    showModal('おかえりなさい！',`<p>ゲームを離れていた時間：<strong>${offlineDuration(result.age)}</strong></p><p>その間に採掘した粘土：<strong>+${formatNumber(result.income)}</strong></p><p>施設・強化の自動購入は休止中です。</p>`,[{label:'採掘を再開'}]);
+  }
+  function resumeGame(){
+    if(!suspended||gameLocked||document.hidden)return;
+    suspended=false;
+    const report=applyOfflineProduction(state.lastSaved);
+    lastFrame=now();
+    renderStats();renderShop();save();reportOffline(report);
+  }
+  function suspendGame(){
+    if(suspended||gameLocked)return;
+    // Capture any outstanding visible-time production before saving the checkpoint.
+    gameTick();
+    suspended=true;
+    save();
   }
   function save(){
     if(gameLocked)return false;
@@ -503,12 +535,12 @@
     ]);
   }
   function gameTick(){
+    if(suspended||document.hidden)return;
     const t=now();let elapsed=Math.max(0,t-lastFrame);lastFrame=t;
     if(!gameLocked){
       if(elapsed>0){
-        const effectiveMs=Math.min(elapsed,MAX_OFFLINE_MS);
-        const factor=elapsed>10000?.25:1;
-        const earned=getCpsAt(state,t)*effectiveMs/1000*factor;
+        const effectiveMs=Math.min(elapsed,1000);
+        const earned=getCpsAt(state,t)*effectiveMs/1000;
         if(Number.isFinite(earned)&&earned>0)gain(earned);
       }
       checkBonus(t);
@@ -523,7 +555,7 @@
     if(!el.home.hidden)document.body.classList.add('in-toolbox');
     const status=loadSaved();
     if(status==='corrupt'){showCorruptScreen()}
-    else{lastTier=-1;awardAchievements(true);renderStats();renderShop();if(status==='new')save();if(status==='volatile')markDirty()}
+    else{lastTier=-1;awardAchievements(true);renderStats();renderShop();if(status==='new')save();if(status==='volatile')markDirty();if(pendingOfflineReport){save();queueMicrotask(()=>reportOffline(pendingOfflineReport))}}
     el.clayButton.addEventListener('click',tap);
     el.bonus.addEventListener('click',()=>{if(!state.autoMining)claimBonus()});
     document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>setTab(t.dataset.tab)));
@@ -544,8 +576,9 @@
       if(event.target.id==='number-format'){state.numberFormat=event.target.value;lastToolCount=-1;renderStats();renderShop();markDirty()}
     });
     el.file.addEventListener('change',event=>importSave(event.target.files?.[0]));
-    document.addEventListener('visibilitychange',()=>{if(document.hidden)save();else lastFrame=Math.min(lastFrame,now())});
-    window.addEventListener('pagehide',save);
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)suspendGame();else resumeGame()});
+    window.addEventListener('pagehide',suspendGame);
+    window.addEventListener('pageshow',()=>{if(!document.hidden)resumeGame()});
     window.setInterval(gameTick,200);
     window.__clayClickerDiagnostics=Object.freeze({getSnapshot:()=>({clay:state.clay,lifetime:state.lifetime,cps:getCps(),tier:getTier(state.lifetime),facilities:state.buildings.length,prestige:state.prestige,prestigePower:state.prestigePower,autoMining:state.autoMining,saveKey:SAVE_KEY})});
   }
