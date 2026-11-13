@@ -1,26 +1,26 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.7.2 (2026-11-13)
+ * Version: 0.7.3 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.7.2';
+  const VERSION = '0.7.3';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const OFFLINE_MIN_MS = 5000; // Short interruptions are not reported
-  const RATIO = 9;
+  const RATIO = 10;
 
   const TIER_NAMES = [
-    '粘土','圧縮粘土','二重圧縮粘土','高密度圧縮粘土','超高密度粘土',
+    '粘土','10倍圧縮粘土','100倍圧縮粘土','1000倍圧縮粘土','10000倍圧縮粘土',
     '結晶粘土','強化結晶粘土','ナノ粘土','分子粘土','原子粘土',
     '量子粘土','超伝導粘土','プラズマ粘土','中性子粘土','星核粘土',
     '超新星粘土','重力凝縮粘土','特異点粘土','ブラックホール粘土',
     '暗黒物質粘土','負質量粘土','反粘土','反物質原鉱','高純度反物質','純反物質'
   ];
-  const TIERS = TIER_NAMES.map((name, level) => ({ name, level, factor: 10 ** (2*level + .18*level*level) }));
+  const TIERS = TIER_NAMES.map((name, level) => ({ name, level, factor: 10 ** (2*level + .18*level*level), unitValue: RATIO ** level }));
   const FACILITIES = [
     ['スコップ',15,0.1,'╱','手作業で少しずつ採掘'],
     ['採掘ドローン',100,1,'◇','小型ドローンで自動採掘'],
@@ -69,7 +69,7 @@
     ['billion','億を超えて','累計10億 粘土を生産',s=>s.lifetime>=1e9],
     ['quadrillion','惑星規模','累計1,000兆 粘土を生産',s=>s.lifetime>=1e15],
     ['zillion','無限への入口','累計1垓 粘土を生産',s=>s.lifetime>=1e20],
-    ['tier-3','圧縮の達人','高密度圧縮粘土に進化',s=>getTier(s.lifetime)>=3],
+    ['tier-3','圧縮の達人','1000倍圧縮粘土に進化',s=>getTier(s.lifetime)>=3],
     ['tier-10','量子の地平線','量子粘土に進化',s=>getTier(s.lifetime)>=10],
     ['tier-final','純粋な到達点','純反物質に進化',s=>getTier(s.lifetime)>=TIERS.length-1]
   ].map(([id,name,desc,test])=>({id,name,desc,test}));
@@ -272,13 +272,13 @@
     }
     const globalBonus=GLOBAL_LEVELS.reduce((a,_,j)=>a*(s.upgrades.includes(`g-${j}`)?1.6:1),1);
     const boosted=t<s.boostUntil?7:1;
-    const clicks=s.buildings[AUTO_CLICK_ID]*(Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(s.upgrades.includes(`c-${j}`)?1:0),0)))*Math.pow(1.22,stage);
+    const clicks=s.buildings[AUTO_CLICK_ID]*(Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(s.upgrades.includes(`c-${j}`)?1:0),0)))*Math.pow(RATIO,stage);
     return (result*Math.pow(1.50,stage)*globalBonus+clicks)*boosted*prestigeMultiplier(s);
   }
   function getCps(){return getCpsAt(state,now())}
   function getClickPower(){
     let power=Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(upgradeOwned(`c-${j}`)?1:0),0));
-    power *= Math.pow(1.22,getTier(state.lifetime));
+    power *= Math.pow(RATIO,getTier(state.lifetime));
     return power*prestigeMultiplier(state);
   }
   function costFor(f,n=1,owned=state.buildings[f.id]){
