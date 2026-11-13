@@ -21,3 +21,24 @@ body.in-toolbox .app{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
 @keyframes pick-swing{from{transform:rotate(-24deg)}to{transform:rotate(35deg)}}
 .auto-active .clay-button{filter:brightness(.55);pointer-events:none}.auto-overlay{position:absolute;inset:0;background:#10162d99;z-index:4;display:flex;flex-direction:column;justify-content:center;align-items:center;pointer-events:none;text-align:center;font-size:17px;font-weight:900;color:#ffe2a9;text-shadow:2px 2px #101629}.auto-overlay small{font-size:10px;margin-top:9px;color:#f5e7ce}
 .settings-section select{display:block;width:100%;max-width:310px;background:#25304e;border:2px solid #7788ad;color:#fff1d0;padding:10px;margin:7px 0 10px;font:inherit}
+
+/* v0.4.0: single always-visible storage, independent production statistics */
+.sticky-storage{position:sticky;top:env(safe-area-inset-top);z-index:30;margin:0 0 12px;padding:12px 16px;max-height:min(32vh,200px);overflow-y:auto;overflow-x:hidden;background:#262a46;border:3px solid #667495;box-shadow:5px 5px 0 #090c18}
+.sticky-storage .current-amount{font-size:clamp(22px,4vw,38px);margin:6px 0 3px;line-height:1.13;overflow-wrap:anywhere}
+.sticky-storage .tier-name{font-size:13px;margin:0}
+.sticky-storage .raw-equivalent{font-size:10px;min-height:0}
+.production-panel{padding:10px 12px}
+.production-panel .stats-strip{margin:0}
+.click-zone{height:238px;min-height:238px;margin:9px 0 4px;overflow:visible}
+.auto-tools{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:visible}
+.auto-tool{position:absolute;width:16px;height:18px;margin:-9px 0 0 -8px;display:block;font-size:0;filter:none;transform:rotate(var(--angle));animation:pixel-pick-swing 1.2s steps(3,end) infinite alternate;transform-origin:50% 50%;image-rendering:pixelated}
+.pick-head{position:absolute;top:1px;left:1px;width:14px;height:4px;background:#c7d5dc;box-shadow:0 3px #738ba0,2px -2px #f3e6c9;clip-path:polygon(0 0,100% 0,80% 100%,20% 100%)}
+.pick-handle{position:absolute;top:5px;left:7px;width:4px;height:12px;background:#bd8155;box-shadow:2px 0 #654a43}
+@keyframes pixel-pick-swing{from{transform:rotate(calc(var(--angle) - 15deg))}to{transform:rotate(calc(var(--angle) + 15deg))}}
+.auto-tool-count{position:absolute;right:0;bottom:0;font-size:11px;line-height:1.3;max-width:85%;overflow-wrap:anywhere;background:#222a44;border:2px solid #a3b1cb;color:#ffe4ac;padding:3px 5px;z-index:3}
+.auto-overlay{inset:0;z-index:4;background:#10162dc9;padding:12px;font-size:clamp(13px,3.8vw,17px);text-shadow:none;line-height:1.5}
+.auto-overlay-title{display:block;width:100%;text-align:center;letter-spacing:0}
+.auto-overlay small{display:block;max-width:100%;line-height:1.5}
+.scene-instruction{position:relative;z-index:5;margin-top:8px;text-align:center}
+@media(max-width:810px){.sticky-storage{padding:9px 12px;max-height:min(30vh,180px)}.sticky-storage .current-amount{font-size:clamp(20px,6vw,28px)}.click-zone{height:205px;min-height:205px}.pixel-stage{overflow:hidden}.auto-tool{width:14px;height:18px}}
+@media(prefers-reduced-motion:reduce){.auto-tool{animation:none}}

@@ -17,14 +17,15 @@
       <div class="top-actions"><span id="save-status" class="save-status">● オートセーブ</span><a class="home-link" id="home-link" href="../../index.html" hidden>⌂ ホームへ戻る</a></div>
     </header>
 
-    <div class="sticky-storage" hidden aria-label="現在の保有粘土">保有粘土 <strong id="sticky-amount">0</strong></div>
+    <section class="sticky-storage panel" aria-label="現在の保有粘土">
+      <div class="section-kicker">CLAY STORAGE <span id="tier-counter">01 / 25</span></div>
+      <div class="current-amount"><span id="amount">0</span></div>
+      <div id="tier-name" class="tier-name">粘土</div>
+      <div id="raw-amount" class="raw-equivalent">現在の進化：粘土</div>
+    </section>
     <main class="game-grid">
       <section class="play-column" aria-label="粘土生産エリア">
-        <section class="panel status-panel">
-          <div class="section-kicker">CLAY STORAGE <span id="tier-counter">01 / 25</span></div>
-          <div class="current-amount"><span id="amount">0</span></div>
-          <div id="tier-name" class="tier-name">粘土</div>
-          <div id="raw-amount" class="raw-equivalent">粘土換算：0</div>
+        <section class="panel production-panel" aria-label="生産状況">
           <div class="stats-strip">
             <div><span>毎秒の生産</span><strong id="cps">0</strong></div>
             <div><span>タップ生産</span><strong id="click-power">+1</strong></div>
@@ -35,7 +36,7 @@
         <section class="pixel-stage" id="pixel-stage">
           <div class="scene-stars" aria-hidden="true"></div>
           <div class="pixel-stage-label"><span class="on-air"></span> CLAY LAB / EXPERIMENT 001</div>
-          <div class="click-zone" id="click-zone"><div id="auto-tools" class="auto-tools" aria-hidden="true"></div><div id="auto-overlay" class="auto-overlay" hidden>⛏ オートマイニング中<br><small>自動購入モード・手動操作停止</small></div>
+          <div class="click-zone" id="click-zone"><div id="auto-tools" class="auto-tools" aria-hidden="true"></div><div id="auto-overlay" class="auto-overlay" hidden><span class="auto-overlay-title">オートマイニング中</span><br><small>自動購入モード・手動操作停止</small></div>
             <div class="clay-aura" aria-hidden="true"></div>
             <button id="clay-button" class="clay-button" aria-label="粘土を生産する">
               <canvas id="clay-sprite" width="24" height="24" aria-hidden="true"></canvas>
@@ -65,7 +66,7 @@
         <div id="panel-content" class="panel-content"></div>
       </section>
     </main>
-    <footer class="game-footer">CLAY CLICKER — BUILD / EVOLVE / TRANSCEND <span id="version-label">v0.3.0</span></footer>
+    <footer class="game-footer">CLAY CLICKER — BUILD / EVOLVE / TRANSCEND <span id="version-label">v0.4.0</span></footer>
   </div>
   <div id="toast" role="status" aria-live="polite" class="toast" hidden></div>
   <div id="modal-shade" class="modal-shade" hidden><div class="modal panel" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h2 id="modal-title"></h2><div id="modal-body"></div><div id="modal-actions" class="modal-actions"></div></div></div>

@@ -1,13 +1,13 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.3.0 (2026-11-13)
+ * Version: 0.4.0 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.3.0';
+  const VERSION = '0.4.0';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const MAX_OFFLINE_MS = 8 * 60 * 60 * 1000;
@@ -263,7 +263,6 @@
   function renderStats(){
     const tier=getTier(state.lifetime);
     el.amount.textContent=fullInteger(state.clay);
-    const sticky=document.getElementById('sticky-amount');if(sticky)sticky.textContent=fullInteger(state.clay);
     el.tierName.textContent=TIERS[tier].name;
     el.rawAmount.textContent=`現在の進化：${TIERS[tier].name}`;
     el.cps.textContent=formatNumber(getCps())+' /s';
@@ -297,26 +296,31 @@
   let lastToolCount=-1;
   function updateAutoTools(){
     const count=state.buildings[AUTO_CLICK_ID];
-    const shown=Math.min(16,count);
-    if(shown===lastToolCount)return;
-    lastToolCount=shown;
+    if(count===lastToolCount)return;
+    lastToolCount=count;
     const holder=$("auto-tools");holder.replaceChildren();
+    // Display up to 16 pixel-art pickaxes on the square border, not over the clay or caption.
+    const shown=Math.min(16,count);
     for(let i=0;i<shown;i++){
-      const tool=document.createElement('span');tool.className='auto-tool';tool.textContent='⛏';
-      const angle=(2*Math.PI*i/shown)-Math.PI/2;
-      tool.style.left=`${50+41*Math.cos(angle)}%`;
-      tool.style.top=`${50+42*Math.sin(angle)}%`;
+      const tool=document.createElement('span');tool.className='auto-tool';
+      const side=Math.floor(i/Math.max(1,Math.ceil(shown/4)));
+      const slot=i%Math.max(1,Math.ceil(shown/4));
+      const perSide=Math.max(1,Math.ceil(shown/4));
+      const fraction=(slot+.5)/perSide;
+      const positions=[['top',fraction*100,'0'],['right','100',fraction*100],['bottom',(1-fraction)*100,'100'],['left','0',(1-fraction)*100]];
+      const [edge,x,y]=positions[Math.min(3,side)];
+      tool.style.left=typeof x==='number'?x+'%':x+'%';
+      tool.style.top=typeof y==='number'?y+'%':y+'%';
+      tool.style.setProperty('--angle',`${[0,90,180,270][Math.min(3,side)]}deg`);
       tool.style.animationDelay=`${(i%8)*-.17}s`;
+      tool.innerHTML='<i class="pick-head"></i><i class="pick-handle"></i>';
       holder.append(tool);
     }
-    if(count>16){const extra=document.createElement('span');extra.className='auto-tool-count';extra.textContent='×'+formatNumber(count);holder.append(extra)}
-  }
-  function refreshSticky(){
-    if(typeof document.querySelector!=='function')return;
-    const storage=document.querySelector('.status-panel');
-    const sticky=document.querySelector('.sticky-storage');
-    if(!storage||!sticky||typeof storage.getBoundingClientRect!=='function')return;
-    sticky.hidden=storage.getBoundingClientRect().bottom>0;
+    if(count>0){
+      const badge=document.createElement('span');badge.className='auto-tool-count';
+      badge.textContent='×'+formatNumber(count);badge.title=`オートクリッカー ${count}台`;
+      holder.append(badge);
+    }
   }
   function paletteFor(tier){
     if(tier>=23)return ['#8a4b86','#e8a6d5','#fff2fb','#f4da82'];
@@ -518,9 +522,6 @@
     else{lastTier=-1;awardAchievements(true);renderStats();renderShop();if(status==='new')save();if(status==='volatile')markDirty()}
     el.clayButton.addEventListener('click',tap);
     el.bonus.addEventListener('click',()=>{if(!state.autoMining)claimBonus()});
-    window.addEventListener('scroll',refreshSticky,{passive:true});
-    window.addEventListener('resize',refreshSticky);
-    refreshSticky();
     document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>setTab(t.dataset.tab)));
     el.panel.addEventListener('click',event=>{
       const target=event.target.closest('button');if(!target||target.disabled)return;
