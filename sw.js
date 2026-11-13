@@ -2,7 +2,7 @@
  * Limit cache and cleanup to THIS site's path. github.io hosts many repositories
  * under one origin, so deleting all origin caches would harm unrelated apps.
  */
-const CACHE_VERSION = 'v1.1.5-github-pages-civilization-balance-1';
+const CACHE_VERSION = 'v1.1.5-civilization-0.7.0';
 const SCOPE_URL = new URL(self.registration.scope);
 const CACHE_PREFIX = `my-toolbox:${encodeURIComponent(SCOPE_URL.pathname)}:`;
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
