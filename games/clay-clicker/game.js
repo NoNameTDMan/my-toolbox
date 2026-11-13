@@ -1,13 +1,13 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.7.6 (2026-11-13)
+ * Version: 0.8.0 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.7.6';
+  const VERSION = '0.8.0';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const OFFLINE_MIN_MS = 5000; // Short interruptions are not reported
@@ -89,7 +89,7 @@
   const freshState = () => ({
     version:1,clay:0,lifetime:0,clicks:0,buildings: Array(FACILITIES.length).fill(0),
     upgrades:[],achievements:[],lastSaved:now(),boostUntil:0,
-    bonusAt:0,bonusUntil:0,reducedMotion:false,autoMining:false,numberFormat:"full",prestige:0,prestigePower:0,prestigeLuck:0
+    bonusAt:0,bonusUntil:0,reducedMotion:false,autoMining:false,numberFormat:"full",prestige:0,prestigePower:0,prestigeLuck:0,prestigePoints:0,prestigeSpent:0,passiveSkills:[]
   });
   let state = freshState();
   let gameLocked = false;
@@ -106,6 +106,44 @@
   let pendingOfflineReport = null;
 
   const AUTO_CLICK_ID = FACILITIES.length-1;
+  // Permanent skill tree: prerequisite links may cross branches.
+  const SKILLS=[
+    ['core','転生核',1,[],'全生産量 ×1.05'],
+    ['mine','採掘技術',1,['core'],'クリックとオートクリッカー ×1.25'],
+    ['industry','工業技術',1,['core'],'通常施設の生産量 ×1.20'],
+    ['luck','幸運の兆し',1,['core'],'ボーナス粘土の毎分抽選確率 +0.5ポイント'],
+    ['auto','連続採掘',2,['mine'],'オートクリッカーの生産量 ×1.50'],
+    ['build','建設技術',2,['industry'],'施設購入費用 ×0.95'],
+    ['time','時間採掘',2,['luck'],'オフライン生産量 ×1.20'],
+    ['giant','巨人のツルハシ',4,['auto','build'],'クリックとオートクリッカー ×2'],
+    ['machine','永久採掘機構',4,['build','time'],'通常施設の生産量 ×2'],
+    ['miracle','奇跡の粘土',4,['time','auto'],'ボーナス粘土報酬 ×3']
+  ].map(([id,name,cost,requires,description])=>({id,name,cost,requires,description}));
+  const SKILL_BY_ID=new Map(SKILLS.map(x=>[x.id,x]));
+  const hasSkill=(id,s=state)=>Array.isArray(s.passiveSkills)&&s.passiveSkills.includes(id);
+  const skillFactor=(id,factor,s=state)=>hasSkill(id,s)?factor:1;
+  function skillTreeHtml(purchasable=false){
+    const points=state.prestigePoints||0;
+    let html=`<div class="skill-tree"><p>累計転生ポイント：${state.prestigePower} PT / 保有：${points} PT</p><p>${purchasable?'転生スキルを購入できます。':'通常時は確認専用です。転生直後にスキルを購入できます。'}</p>`;
+    for(const group of [[SKILLS[0]],SKILLS.slice(1,4),SKILLS.slice(4,7),SKILLS.slice(7)]){
+      html+='<div class="skill-tier">'+group.map(n=>{
+        const owned=hasSkill(n.id),ready=n.requires.every(id=>hasSkill(id));
+        const prerequisites=n.requires.map(id=>SKILL_BY_ID.get(id).name).join(' ＋ ')||'なし';
+        return `<div class="skill-node ${owned?'skill-owned':ready?'skill-ready':'skill-locked'}"><strong>${safe(n.name)}</strong><small>${safe(n.description)}</small><small>必要 ${n.cost} PT / 前提：${safe(prerequisites)}</small>${owned?'<b>取得済み</b>':purchasable?`<button data-skill="${n.id}" ${ready&&points>=n.cost?'':'disabled'}>${ready?'取得':'未解放'}</button>`:`<span>${ready?'取得可能':'未解放'}</span>`}</div>`;
+      }).join('')+'</div>';
+    }
+    return html+'</div>';
+  }
+  function buySkill(id){
+    const n=SKILL_BY_ID.get(id);
+    if(!n||hasSkill(id)||!n.requires.every(r=>hasSkill(r))||state.prestigePoints<n.cost)return false;
+    state.prestigePoints-=n.cost;state.prestigeSpent+=n.cost;state.passiveSkills.push(id);
+    save();return true;
+  }
+  function openSkillPurchase(){
+    showModal('永続スキルツリー',skillTreeHtml(true),[{label:'採掘を再開'}]);
+    // The modal body has its own delegated listener for skill purchases.
+  }
   const PRESTIGE_MIN=1e9;
   function bonusChanceFrom(p){return Math.min(.20,Math.max(0,p||0)*.005)}
   function prestigeGain(clay){return clay<PRESTIGE_MIN?0:Math.max(1,Math.floor(Math.log10(clay/PRESTIGE_MIN+1)*3))}
@@ -118,7 +156,7 @@
       minimumFractionDigits:2,maximumFractionDigits:6,useGrouping:true
     });
   }
-  function bonusChance(){return bonusChanceFrom(state.prestigeLuck??state.prestige)}
+  function bonusChance(){return Math.min(.20,bonusChanceFrom(state.prestigeLuck??state.prestige)+(hasSkill('luck')?.005:0))}
   function scheduleBonus(){state.bonusAt=bonusChance()>0?now()+60000:0}
   function fullInteger(n){
     if(!Number.isFinite(n))return '—';
@@ -186,6 +224,13 @@
       s.prestige=Number.isSafeInteger(s.prestige)&&s.prestige>=0&&s.prestige<=10000?s.prestige:0;
       s.prestigePower=Number.isSafeInteger(s.prestigePower)&&s.prestigePower>=0?s.prestigePower:s.prestige;
       s.prestigeLuck=Number.isSafeInteger(s.prestigeLuck)&&s.prestigeLuck>=0?s.prestigeLuck:s.prestige;
+      // Old saves had no spendable points. Grant their earned power once.
+      s.prestigeSpent=Number.isSafeInteger(s.prestigeSpent)&&s.prestigeSpent>=0?s.prestigeSpent:0;
+      s.passiveSkills=Array.isArray(s.passiveSkills)?s.passiveSkills.filter(id=>SKILL_BY_ID.has(id)):[];
+      s.passiveSkills=[...new Set(s.passiveSkills)];
+      const spentCost=s.passiveSkills.reduce((sum,id)=>sum+SKILL_BY_ID.get(id).cost,0);
+      s.prestigeSpent=spentCost;
+      s.prestigePoints=Math.max(0,(s.prestigePower||0)-spentCost);
       s.autoMining=!!s.autoMining;
       s.numberFormat=["full","ja","short"].includes(s.numberFormat)?s.numberFormat:"full";
       s.upgrades=Array.from(new Set(s.upgrades));
@@ -224,7 +269,7 @@
     const boostedMs=Math.max(0,Math.min(age,state.boostUntil-since));
     const normalMs=age-boostedMs;
     const baseCps=getCpsAt(state,Math.max(end,state.boostUntil+1));
-    const income=baseCps*(normalMs+7*boostedMs)/1000;
+    const income=baseCps*(normalMs+7*boostedMs)/1000*skillFactor('time',1.2);
     if(!Number.isFinite(income)||income<0||!Number.isFinite(state.clay+income)||!Number.isFinite(state.lifetime+income))return null;
     if(income>0){state.clay+=income;state.lifetime+=income;awardAchievements(true);}
     return {age,income};
@@ -281,7 +326,9 @@
     const globalBonus=GLOBAL_LEVELS.reduce((a,_,j)=>a*(s.upgrades.includes(`g-${j}`)?1.6:1),1);
     const boosted=t<s.boostUntil?7:1;
     const clicks=s.buildings[AUTO_CLICK_ID]*(Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(s.upgrades.includes(`c-${j}`)?1:0),0)))*Math.pow(RATIO,stage);
-    return (result*Math.pow(1.50,stage)*globalBonus+clicks)*boosted*prestigeMultiplier(s);
+    result*=skillFactor('industry',1.2,s)*skillFactor('machine',2,s);
+    const autoBonus=skillFactor('mine',1.25,s)*skillFactor('auto',1.5,s)*skillFactor('giant',2,s);
+    return (result*Math.pow(1.50,stage)*globalBonus+clicks*autoBonus)*boosted*prestigeMultiplier(s)*skillFactor('core',1.05,s);
   }
   // Actual marginal CPS per facility, using exactly the same calculation as the
   // global CPS total. This includes upgrades, evolution, prestige and timed boosts.
@@ -295,11 +342,11 @@
   function getClickPower(){
     let power=Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(upgradeOwned(`c-${j}`)?1:0),0));
     power *= Math.pow(RATIO,getTier(state.lifetime));
-    return power*prestigeMultiplier(state);
+    return power*prestigeMultiplier(state)*skillFactor('core',1.05)*skillFactor('mine',1.25)*skillFactor('giant',2);
   }
   function costFor(f,n=1,owned=state.buildings[f.id]){
     const r=1.15;
-    return Math.ceil(f.baseCost * Math.pow(r,owned) * (Math.pow(r,n)-1)/(r-1));
+    return Math.ceil(f.baseCost * Math.pow(r,owned) * (Math.pow(r,n)-1)/(r-1)*skillFactor('build',.95));
   }
   function awardAchievements(silent=false){
     const unlocked=[];
@@ -481,6 +528,7 @@
     }else if(activeTab==='settings'){
       el.panel.innerHTML=`<div class="shop-title"><span>ゲーム設定</span><small>ver ${VERSION}</small></div>
         <section class="settings-section"><h3>転生</h3><p>転生回数：${state.prestige} / 生産倍率：×${formatPrestigeMultiplier(prestigeMultiplier(state))} / ボーナス粘土出現抽選確率：${(bonusChance()*100).toFixed(1)}%（毎分）</p><p>保有粘土10億以上で転生可能。転生時の保有粘土から獲得ポイントを計算します（累計生産量ではありません）。施設・強化・保有粘土はリセット。獲得ポイント1につき生産倍率×1.2、ボーナス抽選確率+0.5ポイント（最大20%）。</p><p>現在の保有粘土：<span id="prestige-current-clay">${formatHeadlineNumber(state.clay)}</span> / 今転生すると：+<span id="prestige-preview-points">${prestigeGain(state.clay)}</span>ポイント</p><button id="prestige-action-button" class="danger-button" data-action="prestige" ${state.clay<PRESTIGE_MIN?'disabled':''}>転生する</button></section>
+        <section class="settings-section"><h3>永続スキルツリー（確認専用）</h3>${skillTreeHtml(false)}</section>
         <section class="settings-section"><h3>セーブとバックアップ</h3><p>セーブはこのゲーム専用の領域に保存されます。ほかのツールボックスデータや「文明の種」と混ざりません。10秒ごとの自動保存と予備セーブがあります。</p><div class="settings-buttons"><button class="small-button" data-action="save">今すぐセーブ</button><button class="small-button" data-action="export">JSONを書き出す</button><button class="small-button" data-action="import">JSONを読み込む</button></div></section>
         <section class="settings-section"><h3>表示設定</h3><label for="number-format">数値表記</label><select id="number-format"><option value="full" ${state.numberFormat==='full'?'selected':''}>省略なし</option><option value="ja" ${state.numberFormat==='ja'?'selected':''}>日本式（万・億・兆）</option><option value="short" ${state.numberFormat==='short'?'selected':''}>英語式（k・M・B）</option></select><p>省略なしでも計算精度はJavaScriptの数値型に依存します。</p><label><input type="checkbox" id="reduced-motion" ${state.reducedMotion?'checked':''}>タップ時の演出を軽量化</label></section>
         <section class="settings-section"><h3>進行と仕様</h3><p>進化に必要な累計生産量は段階が進むほど加速的に増加。生産・購入ともに内部では「粘土換算」で一元管理され、表示される粘土が進化しても資源は分裂しません。ボーナス粘土は時間限定で出現します。放置生産は最大8時間、通常速度の25%です。</p></section>
@@ -531,8 +579,10 @@
       {label:'キャンセル'},
       {label:'転生を実行',danger:true,action:()=>{
         const old=state;state=freshState();state.prestige=(old.prestige||0)+1;state.prestigePower=(old.prestigePower??old.prestige??0)+gain;state.prestigeLuck=(old.prestigeLuck??old.prestige??0)+gain;
+        state.prestigeSpent=old.prestigeSpent||0;state.prestigePoints=(old.prestigePoints??old.prestigePower??0)+gain;
+        state.passiveSkills=(old.passiveSkills||[]).slice();
         state.achievements=old.achievements.slice();state.reducedMotion=old.reducedMotion;state.numberFormat=old.numberFormat;
-        scheduleBonus();lastTier=-1;renderStats();setTab('buildings');save();showToast('転生しました！');
+        scheduleBonus();lastTier=-1;renderStats();setTab('buildings');save();openSkillPurchase();
       }}
     ]);
   }
@@ -540,7 +590,7 @@
     if(gameLocked||!state.bonusUntil||now()>state.bonusUntil)return;
     state.bonusUntil=0;state.bonusAt=now()+60000;
     if(Math.random()<.5){
-      const amount=Math.max(30,getCps()*75,getClickPower()*20);
+      const amount=Math.max(30,getCps()*75,getClickPower()*20)*skillFactor('miracle',3);
       gain(amount);showToast(`✦ ボーナス粘土！ +${formatNumber(amount)}`);
     }else{state.boostUntil=now()+30000;showToast('✦ フィーバー！ 30秒間生産速度 ×7')}
     renderStats();renderShop();
@@ -609,7 +659,7 @@
     if(!gameLocked){
       if(elapsed>0){
         const effectiveMs=Math.min(elapsed,1000);
-        const earned=getCpsAt(state,t)*effectiveMs/1000;
+        const earned=getCpsAt(state,t)*effectiveMs/1000*skillFactor('time',1.2);
         if(Number.isFinite(earned)&&earned>0)gain(earned);
       }
       checkBonus(t);
@@ -643,6 +693,13 @@
       if(event.target.id==='reduced-motion'){state.reducedMotion=event.target.checked;markDirty()}
       if(event.target.id==='auto-mining'){state.autoMining=event.target.checked;renderStats();renderShop();markDirty()}
       if(event.target.id==='number-format'){state.numberFormat=event.target.value;lastToolCount=-1;renderStats();renderShop();markDirty()}
+    });
+    el.modalBody.addEventListener('click',event=>{
+      const button=event.target.closest('button[data-skill]');
+      if(button&&!button.disabled&&buySkill(button.dataset.skill)){
+        el.modalBody.innerHTML=skillTreeHtml(true);
+        renderStats();
+      }
     });
     el.file.addEventListener('change',event=>importSave(event.target.files?.[0]));
     document.addEventListener('visibilitychange',()=>{if(document.hidden)suspendGame();else resumeGame()});

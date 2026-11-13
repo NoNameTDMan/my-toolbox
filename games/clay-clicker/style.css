@@ -67,3 +67,13 @@ body.in-toolbox .app{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
 .tier-lifetime strong {height:1.65em;line-height:1.65}
 .sticky-storage .current-amount {height:1.25em;line-height:1.2}
 #prestige-current-clay, #prestige-preview-points {height:1.7em;line-height:1.7}
+
+/* Permanent prestige tree: pixel-style grid, stable mobile widths */
+.skill-tree{min-width:0;overflow-x:auto;padding:8px 0}
+.skill-tier{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:10px 0}
+.skill-tier:first-of-type{grid-template-columns:minmax(0,1fr);max-width:190px;margin-inline:auto}
+.skill-node{border:2px solid #687895;background:#242c47;padding:8px 5px;display:flex;flex-direction:column;gap:5px;min-width:0;font-size:12px;overflow-wrap:anywhere}
+.skill-node strong{color:#f5d28f}.skill-node small{font-size:10px;line-height:1.4}
+.skill-owned{border-color:#8cbb86}.skill-ready{border-color:#c9a867}.skill-locked{opacity:.65}
+.skill-node button{font:inherit;padding:5px 2px;min-height:28px}
+@media(max-width:380px){.skill-tier{gap:4px}.skill-node{font-size:11px;padding:6px 3px}}
