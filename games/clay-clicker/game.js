@@ -89,7 +89,7 @@
   const freshState = () => ({
     version:1,clay:0,lifetime:0,clicks:0,buildings: Array(FACILITIES.length).fill(0),
     upgrades:[],achievements:[],lastSaved:now(),boostUntil:0,
-    bonusAt:0,bonusUntil:0,reducedMotion:false,autoMining:false,numberFormat:"full",prestige:0,prestigePower:0,prestigeLuck:0,prestigePoints:0,prestigeSpent:0,passiveSkills:[]
+    bonusAt:0,bonusUntil:0,reducedMotion:false,autoMining:false,numberFormat:"full",prestige:0,prestigePower:0,prestigeLuck:0,prestigePoints:0,prestigeSpent:0,passiveSkills:[],skillLevels:{},returnBoostUntil:0
   });
   let state = freshState();
   let gameLocked = false;
@@ -106,44 +106,53 @@
   let pendingOfflineReport = null;
 
   const AUTO_CLICK_ID = FACILITIES.length-1;
-  // Permanent skill tree: prerequisite links may cross branches.
+  // Permanent skill levels: level 1 unlocks the ability, later purchases improve it.
+  // Cross-branch prerequisites require both unlocks and specified levels.
   const SKILLS=[
-    ['core','転生核',1,[],'全生産量 ×1.05'],
-    ['mine','採掘技術',1,['core'],'クリックとオートクリッカー ×1.25'],
-    ['industry','工業技術',1,['core'],'通常施設の生産量 ×1.20'],
-    ['luck','幸運の兆し',1,['core'],'ボーナス粘土の毎分抽選確率 +0.5ポイント'],
-    ['auto','連続採掘',2,['mine'],'オートクリッカーの生産量 ×1.50'],
-    ['build','建設技術',2,['industry'],'施設購入費用 ×0.95'],
-    ['time','時間採掘',2,['luck'],'オフライン生産量 ×1.20'],
-    ['giant','巨人のツルハシ',4,['auto','build'],'クリックとオートクリッカー ×2'],
-    ['machine','永久採掘機構',4,['build','time'],'通常施設の生産量 ×2'],
-    ['miracle','奇跡の粘土',4,['time','auto'],'ボーナス粘土報酬 ×3']
-  ].map(([id,name,cost,requires,description])=>({id,name,cost,requires,description}));
+    ['core','粘土の祝福',1,20,[], '全生産量',5,'percent'],
+    ['mine','採掘の極意',1,15,[['core',1]],'クリック生産',20,'percent'],
+    ['industry','永久機関',1,20,[['core',1]],'通常施設生産',10,'percent'],
+    ['luck','幸運の粘土',1,10,[['core',1]],'ボーナス抽選確率',.3,'chance'],
+    ['auto','自動採掘技術',2,15,[['mine',3]],'オートクリッカー生産',15,'percent'],
+    ['build','大量生産技術',2,10,[['industry',3]],'施設購入価格',2,'discount'],
+    ['time','時間の蓄積',2,10,[['luck',2],['industry',2]],'復帰後10分間の生産ボーナス',5,'return'],
+    ['upgrade','強化研究',2,10,[['build',2],['mine',2]],'通常強化価格',3,'discount'],
+    ['miracle','粘土増幅',2,15,[['luck',3],['auto',2]],'ボーナス報酬',20,'percent'],
+    ['giant','採掘革命',4,10,[['auto',4],['build',3]],'クリック・オートクリッカー生産',20,'percent'],
+    ['machine','超効率生産',4,10,[['build',4],['time',3]],'通常施設生産',20,'percent'],
+    ['singularity','粘土の特異点',8,10,[['giant',5],['machine',5],['miracle',4],['upgrade',3]],'全生産量',30,'percent']
+  ].map(([id,name,base,max,requires,label,step,type])=>({id,name,base,max,requires,label,step,type}));
   const SKILL_BY_ID=new Map(SKILLS.map(x=>[x.id,x]));
-  const hasSkill=(id,s=state)=>Array.isArray(s.passiveSkills)&&s.passiveSkills.includes(id);
-  const skillFactor=(id,factor,s=state)=>hasSkill(id,s)?factor:1;
+  const skillLevel=(id,s=state)=>Math.max(0,Math.min(SKILL_BY_ID.get(id)?.max||0,Number(s.skillLevels?.[id]||0)));
+  const skillFactor=(id,step,s=state)=>1+step*skillLevel(id,s);
+  const skillCost=(n,level)=>n.base+Math.floor(level/3);
+  const skillReady=(n,s=state)=>n.requires.every(([id,level])=>skillLevel(id,s)>=level);
+  const skillEffect=n=>`${n.label} ${n.type==='chance'?`+${(n.step*skillLevel(n.id)).toFixed(1)}ポイント` :n.type==='discount'?`-${n.step*skillLevel(n.id)}%`:n.type==='return'?`+${n.step*skillLevel(n.id)}%`: `+${n.step*skillLevel(n.id)}%`}`;
   function skillTreeHtml(purchasable=false){
     const points=state.prestigePoints||0;
-    let html=`<div class="skill-tree"><p>累計転生ポイント：${state.prestigePower} PT / 保有：${points} PT</p><p>${purchasable?'転生スキルを購入できます。':'通常時は確認専用です。転生直後にスキルを購入できます。'}</p>`;
-    for(const group of [[SKILLS[0]],SKILLS.slice(1,4),SKILLS.slice(4,7),SKILLS.slice(7)]){
+    let html=`<div class="skill-tree"><p>累計転生ポイント：${state.prestigePower} PT / 保有：${points} PT</p><p>${purchasable?'スキルの解放・強化が可能です。':'通常時は確認専用です。転生直後に購入できます。'}</p>`;
+    for(const group of [SKILLS.slice(0,1),SKILLS.slice(1,4),SKILLS.slice(4,7),SKILLS.slice(7,10),SKILLS.slice(10)]){
       html+='<div class="skill-tier">'+group.map(n=>{
-        const owned=hasSkill(n.id),ready=n.requires.every(id=>hasSkill(id));
-        const prerequisites=n.requires.map(id=>SKILL_BY_ID.get(id).name).join(' ＋ ')||'なし';
-        return `<div class="skill-node ${owned?'skill-owned':ready?'skill-ready':'skill-locked'}"><strong>${safe(n.name)}</strong><small>${safe(n.description)}</small><small>必要 ${n.cost} PT / 前提：${safe(prerequisites)}</small>${owned?'<b>取得済み</b>':purchasable?`<button data-skill="${n.id}" ${ready&&points>=n.cost?'':'disabled'}>${ready?'取得':'未解放'}</button>`:`<span>${ready?'取得可能':'未解放'}</span>`}</div>`;
+        const level=skillLevel(n.id),ready=skillReady(n),maxed=level>=n.max,cost=skillCost(n,level);
+        const prerequisites=n.requires.map(([id,lv])=>`${SKILL_BY_ID.get(id).name} Lv.${lv}`).join(' ＋ ')||'なし';
+        const enabled=ready&&!maxed&&points>=cost;
+        return `<div class="skill-node ${level?'skill-owned':ready?'skill-ready':'skill-locked'}"><strong>${safe(n.name)}</strong><small>Lv.${level} / ${n.max}</small><small>${safe(skillEffect(n))}</small><small>前提：${safe(prerequisites)}</small>${maxed?'<b>MAX</b>':purchasable?`<button data-skill="${n.id}" ${enabled?'':'disabled'}>${level?'強化':'解放'} ${cost} PT</button>`:`<span>次回 ${cost} PT</span>`}</div>`;
       }).join('')+'</div>';
     }
     return html+'</div>';
   }
   function buySkill(id){
-    const n=SKILL_BY_ID.get(id);
-    if(!n||hasSkill(id)||!n.requires.every(r=>hasSkill(r))||state.prestigePoints<n.cost)return false;
-    state.prestigePoints-=n.cost;state.prestigeSpent+=n.cost;state.passiveSkills.push(id);
+    const n=SKILL_BY_ID.get(id);if(!n)return false;
+    const level=skillLevel(id),cost=skillCost(n,level);
+    if(level>=n.max||!skillReady(n)||state.prestigePoints<cost)return false;
+    state.prestigePoints-=cost;state.prestigeSpent+=cost;state.skillLevels[id]=level+1;
+    state.passiveSkills=Object.keys(state.skillLevels).filter(id=>state.skillLevels[id]>0);
     save();return true;
   }
-  function openSkillPurchase(){
-    showModal('永続スキルツリー',skillTreeHtml(true),[{label:'採掘を再開'}]);
-    // The modal body has its own delegated listener for skill purchases.
-  }
+  function openSkillPurchase(){showModal('永続スキルツリー',skillTreeHtml(true),[{label:'採掘を再開'}]);}
+  const skillTotalSpent=levels=>SKILLS.reduce((sum,n)=>{let lv=Math.max(0,Math.min(n.max,levels[n.id]||0));for(let i=0;i<lv;i++)sum+=skillCost(n,i);return sum;},0);
+  const upgradeCost=u=>Math.max(1,Math.ceil(u.cost*(1-.03*skillLevel('upgrade'))));
+  const returnBoost=s=>1+.05*skillLevel('time',s);
   const PRESTIGE_MIN=1e9;
   function bonusChanceFrom(p){return Math.min(.20,Math.max(0,p||0)*.005)}
   function prestigeGain(clay){return clay<PRESTIGE_MIN?0:Math.max(1,Math.floor(Math.log10(clay/PRESTIGE_MIN+1)*3))}
@@ -156,7 +165,7 @@
       minimumFractionDigits:2,maximumFractionDigits:6,useGrouping:true
     });
   }
-  function bonusChance(){return Math.min(.20,bonusChanceFrom(state.prestigeLuck??state.prestige)+(hasSkill('luck')?.005:0))}
+  function bonusChance(){return Math.min(.20,bonusChanceFrom(state.prestigeLuck??state.prestige)+(skillLevel('luck')*.003))}
   function scheduleBonus(){state.bonusAt=bonusChance()>0?now()+60000:0}
   function fullInteger(n){
     if(!Number.isFinite(n))return '—';
@@ -225,18 +234,26 @@
       s.prestigePower=Number.isSafeInteger(s.prestigePower)&&s.prestigePower>=0?s.prestigePower:s.prestige;
       s.prestigeLuck=Number.isSafeInteger(s.prestigeLuck)&&s.prestigeLuck>=0?s.prestigeLuck:s.prestige;
       // Old saves had no spendable points. Grant their earned power once.
-      s.prestigeSpent=Number.isSafeInteger(s.prestigeSpent)&&s.prestigeSpent>=0?s.prestigeSpent:0;
-      s.passiveSkills=Array.isArray(s.passiveSkills)?s.passiveSkills.filter(id=>SKILL_BY_ID.has(id)):[];
-      s.passiveSkills=[...new Set(s.passiveSkills)];
-      const spentCost=s.passiveSkills.reduce((sum,id)=>sum+SKILL_BY_ID.get(id).cost,0);
-      s.prestigeSpent=spentCost;
-      s.prestigePoints=Math.max(0,(s.prestigePower||0)-spentCost);
+      // Migrate v0.8.0 one-time skills to level 1, retaining earned points.
+      const legacy={core:'core',mine:'mine',industry:'industry',luck:'luck',auto:'auto',build:'build',time:'time',giant:'giant',machine:'machine',miracle:'miracle'};
+      const levels={};
+      if(s.skillLevels&&typeof s.skillLevels==='object'&&!Array.isArray(s.skillLevels)){
+        for(const n of SKILLS){const v=s.skillLevels[n.id];levels[n.id]=Number.isSafeInteger(v)?Math.max(0,Math.min(n.max,v)):0;}
+      }else{
+        for(const n of SKILLS)levels[n.id]=0;
+        for(const id of Array.isArray(s.passiveSkills)?s.passiveSkills:[])if(legacy[id])levels[legacy[id]]=1;
+      }
+      s.skillLevels=levels;
+      s.passiveSkills=Object.keys(levels).filter(id=>levels[id]>0);
+      s.prestigeSpent=skillTotalSpent(levels);
+      s.prestigePoints=Math.max(0,s.prestigePower-s.prestigeSpent);
+      s.returnBoostUntil=Number.isFinite(s.returnBoostUntil)&&s.returnBoostUntil>0?s.returnBoostUntil:0;
       s.autoMining=!!s.autoMining;
       s.numberFormat=["full","ja","short"].includes(s.numberFormat)?s.numberFormat:"full";
       s.upgrades=Array.from(new Set(s.upgrades));
       s.achievements=s.achievements.filter(id=>ACHIEVEMENTS.some(a=>a.id===id));
       s.boostUntil=Number.isFinite(s.boostUntil)?s.boostUntil:0;
-      s.bonusAt=bonusChanceFrom(s.prestigeLuck)>0?(Number.isFinite(s.bonusAt)&&s.bonusAt>0?s.bonusAt:now()+60000):0;
+      s.bonusAt=(bonusChanceFrom(s.prestigeLuck)+.003*skillLevel('luck',s))>0?(Number.isFinite(s.bonusAt)&&s.bonusAt>0?s.bonusAt:now()+60000):0;
       s.bonusUntil=Number.isFinite(s.bonusUntil)?s.bonusUntil:0;
       s.reducedMotion=!!s.reducedMotion;
       return s;
@@ -269,9 +286,10 @@
     const boostedMs=Math.max(0,Math.min(age,state.boostUntil-since));
     const normalMs=age-boostedMs;
     const baseCps=getCpsAt(state,Math.max(end,state.boostUntil+1));
-    const income=baseCps*(normalMs+7*boostedMs)/1000*skillFactor('time',1.2);
+    const income=baseCps*(normalMs+7*boostedMs)/1000;
     if(!Number.isFinite(income)||income<0||!Number.isFinite(state.clay+income)||!Number.isFinite(state.lifetime+income))return null;
     if(income>0){state.clay+=income;state.lifetime+=income;awardAchievements(true);}
+    if(age>=3600000&&skillLevel('time')>0)state.returnBoostUntil=end+600000;
     return {age,income};
   }
   function offlineDuration(ms){
@@ -326,9 +344,9 @@
     const globalBonus=GLOBAL_LEVELS.reduce((a,_,j)=>a*(s.upgrades.includes(`g-${j}`)?1.6:1),1);
     const boosted=t<s.boostUntil?7:1;
     const clicks=s.buildings[AUTO_CLICK_ID]*(Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(s.upgrades.includes(`c-${j}`)?1:0),0)))*Math.pow(RATIO,stage);
-    result*=skillFactor('industry',1.2,s)*skillFactor('machine',2,s);
-    const autoBonus=skillFactor('mine',1.25,s)*skillFactor('auto',1.5,s)*skillFactor('giant',2,s);
-    return (result*Math.pow(1.50,stage)*globalBonus+clicks*autoBonus)*boosted*prestigeMultiplier(s)*skillFactor('core',1.05,s);
+    result*=skillFactor('industry',.10,s)*skillFactor('machine',.20,s);
+    const autoBonus=skillFactor('mine',.20,s)*skillFactor('auto',.15,s)*skillFactor('giant',.20,s);
+    return (result*Math.pow(1.50,stage)*globalBonus+clicks*autoBonus)*boosted*prestigeMultiplier(s)*skillFactor('core',.05,s)*skillFactor('singularity',.30,s)*(t<(s.returnBoostUntil||0)?returnBoost(s):1);
   }
   // Actual marginal CPS per facility, using exactly the same calculation as the
   // global CPS total. This includes upgrades, evolution, prestige and timed boosts.
@@ -342,11 +360,11 @@
   function getClickPower(){
     let power=Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(upgradeOwned(`c-${j}`)?1:0),0));
     power *= Math.pow(RATIO,getTier(state.lifetime));
-    return power*prestigeMultiplier(state)*skillFactor('core',1.05)*skillFactor('mine',1.25)*skillFactor('giant',2);
+    return power*prestigeMultiplier(state)*skillFactor('core',.05)*skillFactor('singularity',.30)*skillFactor('mine',.20)*skillFactor('giant',.20)*(now()<state.returnBoostUntil?returnBoost(state):1);
   }
   function costFor(f,n=1,owned=state.buildings[f.id]){
     const r=1.15;
-    return Math.ceil(f.baseCost * Math.pow(r,owned) * (Math.pow(r,n)-1)/(r-1)*skillFactor('build',.95));
+    return Math.ceil(f.baseCost * Math.pow(r,owned) * (Math.pow(r,n)-1)/(r-1)*(1-.02*skillLevel('build')));
   }
   function awardAchievements(silent=false){
     const unlocked=[];
@@ -378,8 +396,8 @@
   }
   function purchaseUpgrade(id,automatic=false){
     const u=UPGRADE_BY_ID.get(id);
-    if(gameLocked||(state.autoMining&&!automatic)||!u||upgradeOwned(id)||!unlockedUpgrade(u)||state.clay+1e-9<u.cost)return;
-    state.clay=Math.max(0,state.clay-u.cost);state.upgrades.push(id);
+    if(gameLocked||(state.autoMining&&!automatic)||!u||upgradeOwned(id)||!unlockedUpgrade(u)||state.clay+1e-9<upgradeCost(u))return;
+    state.clay=Math.max(0,state.clay-upgradeCost(u));state.upgrades.push(id);
     if(!automatic){showToast(`${u.name} を購入！`);renderStats();renderShop()}markDirty();
   }
   function updatePrestigePreview(){
@@ -424,7 +442,7 @@
     if(!el.boost.hidden)el.boostTimer.textContent=String(Math.ceil((state.boostUntil-now())/1000));
     const bonusVisible=state.bonusUntil>now();el.bonus.hidden=!bonusVisible;
     if(activeTab==='upgrades')el.upgradeDot.hidden=true;
-    else el.upgradeDot.hidden=!UPGRADES.some(u=>unlockedUpgrade(u)&&!upgradeOwned(u.id)&&state.clay>=u.cost);
+    else el.upgradeDot.hidden=!UPGRADES.some(u=>unlockedUpgrade(u)&&!upgradeOwned(u.id)&&state.clay>=upgradeCost(u));
   }
   let lastToolCount=-1;
   function updateAutoTools(){
@@ -515,11 +533,11 @@
       if(next)html+=`<div class="empty-state">次の設備は累計 ${formatNumber(next.baseCost*.25)} 粘土から表示されます</div>`;
       el.panel.innerHTML=html;
     }else if(activeTab==='upgrades'){
-      const up=UPGRADES.filter(u=>unlockedUpgrade(u)&&!upgradeOwned(u.id)).sort((a,b)=>(state.clay>=b.cost)-(state.clay>=a.cost)||a.cost-b.cost);
+      const up=UPGRADES.filter(u=>unlockedUpgrade(u)&&!upgradeOwned(u.id)).sort((a,b)=>(state.clay>=b.cost)-(state.clay>=a.cost)||upgradeCost(a)-upgradeCost(b));
       let html=`<div class="shop-title"><span>永久強化</span><small>購入済み ${state.upgrades.length} / ${UPGRADES.length}</small></div>`;
       html+=up.length?up.map(u=>{
-        const enough=state.clay>=u.cost;
-        return `<article class="upgrade-row ${enough?'affordable':''}"><div class="pixel-small" aria-hidden="true">${u.symbol}</div><div class="upgrade-info"><div class="building-name">${safe(u.name)}</div><div class="building-sub">${safe(u.desc)}</div><div class="building-price ${enough?'can':''}">${formatNumber(u.cost)} 粘土</div></div><button class="upgrade-buy" data-upgrade="${safe(u.id)}" ${enough&&!state.autoMining?'':'disabled'}>強化</button></article>`;
+        const enough=state.clay>=upgradeCost(u);
+        return `<article class="upgrade-row ${enough?'affordable':''}"><div class="pixel-small" aria-hidden="true">${u.symbol}</div><div class="upgrade-info"><div class="building-name">${safe(u.name)}</div><div class="building-sub">${safe(u.desc)}</div><div class="building-price ${enough?'can':''}">${formatNumber(upgradeCost(u))} 粘土</div></div><button class="upgrade-buy" data-upgrade="${safe(u.id)}" ${enough&&!state.autoMining?'':'disabled'}>強化</button></article>`;
       }).join(''):'<div class="empty-state">新しい強化は条件を達成すると解禁されます。<br>生産と施設購入を進めよう！</div>';
       el.panel.innerHTML=html;
     }else if(activeTab==='achievements'){
@@ -564,9 +582,9 @@
     }
     for(const u of UPGRADES){
       if(upgradeOwned(u.id)||!unlockedUpgrade(u))continue;
-      evaluate(u.cost,s=>s.upgrades.push(u.id),'upgrade',u.id);
+      evaluate(upgradeCost(u),s=>s.upgrades.push(u.id),'upgrade',u.id);
     }
-    candidates.sort((a,b)=>b.score-a.score||a.wait-b.wait||a.cost-b.cost);
+    candidates.sort((a,b)=>b.score-a.score||a.wait-b.wait||upgradeCost(a)-upgradeCost(b));
     const best=candidates[0];
     if(!best||best.wait>0||state.clay<best.cost)return;
     if(best.kind==='facility')purchaseFacility(best.id,true);
@@ -580,7 +598,7 @@
       {label:'転生を実行',danger:true,action:()=>{
         const old=state;state=freshState();state.prestige=(old.prestige||0)+1;state.prestigePower=(old.prestigePower??old.prestige??0)+gain;state.prestigeLuck=(old.prestigeLuck??old.prestige??0)+gain;
         state.prestigeSpent=old.prestigeSpent||0;state.prestigePoints=(old.prestigePoints??old.prestigePower??0)+gain;
-        state.passiveSkills=(old.passiveSkills||[]).slice();
+        state.passiveSkills=(old.passiveSkills||[]).slice();state.skillLevels={...(old.skillLevels||{})};
         state.achievements=old.achievements.slice();state.reducedMotion=old.reducedMotion;state.numberFormat=old.numberFormat;
         scheduleBonus();lastTier=-1;renderStats();setTab('buildings');save();openSkillPurchase();
       }}
@@ -590,7 +608,7 @@
     if(gameLocked||!state.bonusUntil||now()>state.bonusUntil)return;
     state.bonusUntil=0;state.bonusAt=now()+60000;
     if(Math.random()<.5){
-      const amount=Math.max(30,getCps()*75,getClickPower()*20)*skillFactor('miracle',3);
+      const amount=Math.max(30,getCps()*75,getClickPower()*20)*skillFactor('miracle',.20);
       gain(amount);showToast(`✦ ボーナス粘土！ +${formatNumber(amount)}`);
     }else{state.boostUntil=now()+30000;showToast('✦ フィーバー！ 30秒間生産速度 ×7')}
     renderStats();renderShop();
@@ -659,7 +677,7 @@
     if(!gameLocked){
       if(elapsed>0){
         const effectiveMs=Math.min(elapsed,1000);
-        const earned=getCpsAt(state,t)*effectiveMs/1000*skillFactor('time',1.2);
+        const earned=getCpsAt(state,t)*effectiveMs/1000;
         if(Number.isFinite(earned)&&earned>0)gain(earned);
       }
       checkBonus(t);
