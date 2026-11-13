@@ -49,3 +49,21 @@ body.in-toolbox .app{padding-bottom:calc(92px + env(safe-area-inset-bottom))}
 .auto-tool{z-index:2}
 .auto-tool-count{right:-10px;bottom:-13px}
 @media(max-width:810px){.auto-tools{width:164px;height:164px}}
+
+/* v0.7.5: reserve stable single-line numeric slots. Long numbers scroll within
+   their own slot instead of changing panel height or shifting adjacent UI. */
+.sticky-storage .current-amount, .production-panel .stats-strip strong,
+.tier-lifetime strong, #prestige-current-clay, #prestige-preview-points {
+  display:block; min-width:0; max-width:100%; white-space:nowrap;
+  overflow-x:auto; overflow-y:hidden; overflow-wrap:normal; word-break:normal;
+  scrollbar-width:none; font-variant-numeric:tabular-nums;
+}
+.sticky-storage .current-amount::-webkit-scrollbar,
+.production-panel .stats-strip strong::-webkit-scrollbar,
+.tier-lifetime strong::-webkit-scrollbar,
+#prestige-current-clay::-webkit-scrollbar,
+#prestige-preview-points::-webkit-scrollbar {display:none}
+.production-panel .stats-strip strong {height:2.1em; line-height:1.7; }
+.tier-lifetime strong {height:1.65em;line-height:1.65}
+.sticky-storage .current-amount {height:1.25em;line-height:1.2}
+#prestige-current-clay, #prestige-preview-points {height:1.7em;line-height:1.7}

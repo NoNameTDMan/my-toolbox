@@ -1,13 +1,13 @@
 /*
  * 粘土クリッカー / Clay Clicker
- * Version: 0.7.3 (2026-11-13)
+ * Version: 0.7.4 (2026-11-13)
  * Author: Prototype design team (仮)
  * Standalone top-level page; safe for embedding as My Toolbox PWA game.
  * Saving: clay-clicker-save-v1 and clay-clicker-save-v1-last-good only.
  */
 'use strict';
 (() => {
-  const VERSION = '0.7.3';
+  const VERSION = '0.7.5';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const OFFLINE_MIN_MS = 5000; // Short interruptions are not reported
@@ -275,6 +275,14 @@
     const clicks=s.buildings[AUTO_CLICK_ID]*(Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(s.upgrades.includes(`c-${j}`)?1:0),0)))*Math.pow(RATIO,stage);
     return (result*Math.pow(1.50,stage)*globalBonus+clicks)*boosted*prestigeMultiplier(s);
   }
+  // Actual marginal CPS per facility, using exactly the same calculation as the
+  // global CPS total. This includes upgrades, evolution, prestige and timed boosts.
+  function facilityCpsPerUnit(f, s=state, t=now()){
+    const withOne={...s,buildings:s.buildings.slice()};
+    withOne.buildings[f.id]+=1;
+    return Math.max(0,getCpsAt(withOne,t)-getCpsAt(s,t));
+  }
+  function cpsSuffix(){return state.numberFormat==='ja'?' /秒':' /s'}
   function getCps(){return getCpsAt(state,now())}
   function getClickPower(){
     let power=Math.pow(2,CLICK_LEVELS.reduce((n,_,j)=>n+(upgradeOwned(`c-${j}`)?1:0),0));
@@ -334,7 +342,7 @@
     el.amount.textContent=formatHeadlineNumber(state.clay);
     el.tierName.textContent=TIERS[tier].name;
     el.rawAmount.textContent=`現在の進化：${TIERS[tier].name}`;
-    el.cps.textContent=formatHeadlineNumber(getCps())+' /s';
+    el.cps.textContent=formatHeadlineNumber(getCps())+cpsSuffix();
     el.clickPower.textContent='+'+formatNumber(getClickPower());
     el.lifetime.textContent=formatHeadlineNumber(state.lifetime);
     $("tier-lifetime").textContent=formatHeadlineNumber(state.lifetime);
@@ -446,7 +454,7 @@
       const visible=FACILITIES.filter((f,i)=>i<=2||i===AUTO_CLICK_ID||state.buildings[i]>0||state.lifetime>=f.baseCost*.25||state.clay>=f.baseCost).sort((a,b)=>(a.id===AUTO_CLICK_ID?-1:b.id===AUTO_CLICK_ID?1:a.id-b.id));
       html+=visible.map(f=>{
         const cost=costFor(f,buyAmount);const enough=state.clay>=cost;
-        return `<article class="building-row ${enough?'affordable':''}"><div class="pixel-small" aria-hidden="true">${safe(f.symbol)}</div><div class="building-info"><div class="building-name">${safe(f.name)}</div><div class="building-sub">${safe(f.desc)}<br>+${formatNumber(f.cps)} / 秒・台（基本値）</div><div class="building-price ${enough?'can':''}">費用 ${formatNumber(cost)} 粘土</div><span class="owned">所有 ${formatNumber(state.buildings[f.id])} 台</span></div><button class="build-button" data-buy="${f.id}" ${enough&&!state.autoMining?'':'disabled'} aria-label="${safe(f.name)} を${buyAmount}台購入">×${buyAmount}<br>購入</button></article>`;
+        return `<article class="building-row ${enough?'affordable':''}"><div class="pixel-small" aria-hidden="true">${safe(f.symbol)}</div><div class="building-info"><div class="building-name">${safe(f.name)}</div><div class="building-sub">${safe(f.desc)}<br>+${formatNumber(facilityCpsPerUnit(f))}${cpsSuffix()}・台（強化・進化・転生反映済み）</div><div class="building-price ${enough?'can':''}">費用 ${formatNumber(cost)} 粘土</div><span class="owned">所有 ${formatNumber(state.buildings[f.id])} 台</span></div><button class="build-button" data-buy="${f.id}" ${enough&&!state.autoMining?'':'disabled'} aria-label="${safe(f.name)} を${buyAmount}台購入">×${buyAmount}<br>購入</button></article>`;
       }).join('');
       const next=FACILITIES.find(f=>!visible.includes(f));
       if(next)html+=`<div class="empty-state">次の設備は累計 ${formatNumber(next.baseCost*.25)} 粘土から表示されます</div>`;
