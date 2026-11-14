@@ -7,7 +7,7 @@
  */
 'use strict';
 (() => {
-  const VERSION = '0.8.0';
+  const VERSION = '0.8.3';
   const SAVE_KEY = 'clay-clicker-save-v1';
   const BACKUP_KEY = 'clay-clicker-save-v1-last-good';
   const OFFLINE_MIN_MS = 5000; // Short interruptions are not reported
@@ -125,7 +125,10 @@
   const SKILL_BY_ID=new Map(SKILLS.map(x=>[x.id,x]));
   const skillLevel=(id,s=state)=>Math.max(0,Math.min(SKILL_BY_ID.get(id)?.max||0,Number(s.skillLevels?.[id]||0)));
   const skillFactor=(id,step,s=state)=>1+step*skillLevel(id,s);
-  const skillCost=(n,level)=>n.base+Math.floor(level/3);
+  // v0.8.3: unlocks remain accessible; successive levels become progressively expensive.
+  // Base cost is higher for advanced nodes. Existing purchases retain their old cost.
+  const skillCost=(n,level)=>n.base*(level===0?3:Math.ceil(4+2*Math.pow(level,1.65)));
+  const legacySkillCost=(n,level)=>n.base+Math.floor(level/3);
   const skillReady=(n,s=state)=>n.requires.every(([id,level])=>skillLevel(id,s)>=level);
   const skillEffect=n=>`${n.label} ${n.type==='chance'?`+${(n.step*skillLevel(n.id)).toFixed(1)}ポイント` :n.type==='discount'?`-${n.step*skillLevel(n.id)}%`:n.type==='return'?`+${n.step*skillLevel(n.id)}%`: `+${n.step*skillLevel(n.id)}%`}`;
   function skillTreeHtml(purchasable=false){
@@ -150,7 +153,7 @@
     save();return true;
   }
   function openSkillPurchase(){showModal('永続スキルツリー',skillTreeHtml(true),[{label:'採掘を再開'}]);}
-  const skillTotalSpent=levels=>SKILLS.reduce((sum,n)=>{let lv=Math.max(0,Math.min(n.max,levels[n.id]||0));for(let i=0;i<lv;i++)sum+=skillCost(n,i);return sum;},0);
+  const skillTotalSpent=(levels,costFn=skillCost)=>SKILLS.reduce((sum,n)=>{let lv=Math.max(0,Math.min(n.max,levels[n.id]||0));for(let i=0;i<lv;i++)sum+=costFn(n,i);return sum;},0);
   const upgradeCost=u=>Math.max(1,Math.ceil(u.cost*(1-.03*skillLevel('upgrade'))));
   const returnBoost=s=>1+.05*skillLevel('time',s);
   const PRESTIGE_MIN=1e9;
@@ -245,7 +248,10 @@
       }
       s.skillLevels=levels;
       s.passiveSkills=Object.keys(levels).filter(id=>levels[id]>0);
-      s.prestigeSpent=skillTotalSpent(levels);
+      // Do not retroactively charge the new, higher prices for previously owned levels.
+      // Old v0.8.1/0.8.2 saves stored the actual spent total; preserve it.
+      const previousSpent=Number.isSafeInteger(s.prestigeSpent)&&s.prestigeSpent>=0?s.prestigeSpent:skillTotalSpent(levels,legacySkillCost);
+      s.prestigeSpent=Math.min(s.prestigePower,previousSpent);
       s.prestigePoints=Math.max(0,s.prestigePower-s.prestigeSpent);
       s.returnBoostUntil=Number.isFinite(s.returnBoostUntil)&&s.returnBoostUntil>0?s.returnBoostUntil:0;
       s.autoMining=!!s.autoMining;
